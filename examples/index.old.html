@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Ermis Classroom SDK Test</title>
+  <style>
+    #main-video, #sidebar-videos {
+      border: 1px solid #ccc;
+      min-height: 200px;
+      margin: 8px 0;
+      padding: 8px;
+    }
+  </style>
+  <!-- <link rel="stylesheet" href="index.css"> -->
+</head>
+<body>
+  <h1>Ermis Classroom SDK Test</h1>
+  <div>
+    <label>User ID: <input id="userId" value="teacher@school.com"></label>
+    <label>Room Name: <input id="roomName" value="Physics Class"></label>
+    <button id="loginBtn">Login & Join Room</button>
+  </div>
+  <div>
+    <button id="getDevicesBtn">Get Devices</button>
+    <button id="checkPermsBtn">Check Permissions</button>
+  </div>
+  <div id="main-video">Main Video Area</div>
+  <div id="sidebar-videos">Sidebar Video Area</div>
+  <pre id="log"></pre>
+
+  <!-- Nếu bạn build UMD: -->
+  <!-- <script src="../dist/ermis-classroom.js"></script> -->
+  <!-- Nếu dùng ESM: -->
+
+
+  <script type="module">
+    // import ErmisClassroom from '../dist/index.js?v=1.0.7';
+    const moduleUrl = '../dist/index.js?v=' + Date.now();
+  const { default: ErmisClassroom } = await import(moduleUrl);
+    const log = (msg) => {
+      document.getElementById('log').textContent += msg + '\n';
+    };
+
+    let client;
+
+    document.getElementById('loginBtn').onclick = async () => {
+      const userId = document.getElementById('userId').value;
+      const roomName = document.getElementById('roomName').value;
+
+      try {
+        client = ErmisClassroom.create({
+          host: "daibo.ermis.network:9999", 
+          debug: true,
+        });
+
+        await client.authenticate(userId);
+        log("Authenticated as " + userId);
+        // Set UI containers
+        const mainVideo = document.getElementById("main-video");
+        const sidebar = document.getElementById("sidebar-videos");
+        console.log("[main] Setting UI containers from example:", { mainVideo, sidebar });
+        client.setUIContainers(mainVideo, sidebar);
+
+        const room = await client.createRoom({
+          name: roomName,
+          type: ErmisClassroom.RoomTypes.MAIN,
+        });
+        log("Created room: " + room.name);
+
+        client.on(ErmisClassroom.events.PARTICIPANT_ADDED, ({ participant }) => {
+          log("Participant joined: " + participant.userId);
+        });
+
+
+        // Render tiles when joined
+        client.on(ErmisClassroom.events.ROOM_JOINED, ({ room }) => {
+          room.renderParticipantTiles();
+          log("Room joined: " + room.name);
+        });
+
+      } catch (e) {
+        console.error(e);
+        log("Error: " + e.message);
+      }
+    };
+
+    document.getElementById('getDevicesBtn').onclick = async () => {
+      try {
+        const devices = await ErmisClassroom.MediaDevices.getDevices();
+        log("Cameras: " + devices.cameras.length);
+        log("Microphones: " + devices.microphones.length);
+        log("Speakers: " + devices.speakers.length);
+      } catch (e) {
+        log("Device error: " + e.message);
+      }
+    };
+
+    document.getElementById('checkPermsBtn').onclick = async () => {
+      try {
+        const perms = await ErmisClassroom.MediaDevices.checkPermissions();
+        log("Camera permission: " + (perms.camera?.state || "unknown"));
+        log("Microphone permission: " + (perms.microphone?.state || "unknown"));
+      } catch (e) {
+        log("Permission error: " + e.message);
+      }
+    };
+  </script>
+</body>
+</html>

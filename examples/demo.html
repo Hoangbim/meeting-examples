@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ermis Classroom SDK Demo</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .header {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .header h1 {
+      color: #2c3e50;
+      margin-bottom: 10px;
+    }
+
+    .status {
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+      font-weight: 500;
+    }
+
+    .status.disconnected { background: #f8d7da; color: #721c24; }
+    .status.connecting { background: #fff3cd; color: #856404; }
+    .status.connected { background: #d1edff; color: #0c5460; }
+
+    .auth-section, .room-section {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .auth-section h2, .room-section h2 {
+      margin-bottom: 15px;
+      color: #2c3e50;
+    }
+
+    .form-group {
+      margin-bottom: 15px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 500;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    .btn {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-right: 10px;
+      margin-bottom: 10px;
+    }
+
+    .btn:hover {
+      background: #0056b3;
+    }
+
+    .btn:disabled {
+      background: #6c757d;
+      cursor: not-allowed;
+    }
+
+    .btn.secondary {
+      background: #6c757d;
+    }
+
+    .btn.danger {
+      background: #dc3545;
+    }
+
+    .meeting-area {
+      display: grid;
+      grid-template-columns: 1fr 300px;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    .video-container {
+      background: white;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .main-video {
+      height: 400px;
+      background: #000;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 18px;
+    }
+
+    .sidebar-videos {
+      background: white;
+      border-radius: 8px;
+      padding: 15px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .sidebar-videos h3 {
+      margin-bottom: 15px;
+      color: #2c3e50;
+    }
+
+    .participant-list {
+      list-style: none;
+    }
+
+    .participant-item {
+      padding: 10px;
+      margin-bottom: 8px;
+      background: #f8f9fa;
+      border-radius: 4px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .participant-item.local {
+      background: #d1edff;
+    }
+
+    .participant-item.pinned {
+      background: #d4edda;
+    }
+
+    .participant-controls {
+      display: flex;
+      gap: 5px;
+    }
+
+    .control-btn {
+      background: #28a745;
+      color: white;
+      border: none;
+      padding: 4px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .control-btn.muted {
+      background: #dc3545;
+    }
+
+    .logs {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .logs h3 {
+      margin-bottom: 15px;
+      color: #2c3e50;
+    }
+
+    .log-container {
+      height: 200px;
+      overflow-y: auto;
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      padding: 10px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+    }
+
+    .log-entry {
+      margin-bottom: 5px;
+      padding: 2px 0;
+    }
+
+    .log-entry.error {
+      color: #dc3545;
+    }
+
+    .log-entry.success {
+      color: #28a745;
+    }
+
+    .log-entry.info {
+      color: #007bff;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .room-list {
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      margin-top: 10px;
+    }
+
+    .room-item {
+      padding: 10px;
+      border-bottom: 1px solid #eee;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    .room-item:hover {
+      background: #f8f9fa;
+    }
+
+    .room-item:last-child {
+      border-bottom: none;
+    }
+
+    .room-code {
+      font-family: monospace;
+      background: #f8f9fa;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 12px;
+    }
+
+    .breakout-rooms {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+
+    .breakout-rooms h3 {
+      margin-bottom: 15px;
+      color: #2c3e50;
+    }
+
+    .subroom-list {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .subroom-item {
+      background: #e9ecef;
+      padding: 10px 15px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      border: 2px solid transparent;
+    }
+
+    .subroom-item:hover {
+      background: #dee2e6;
+    }
+
+    .subroom-item.active {
+      background: #d1edff;
+      border-color: #007bff;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>Ermis Classroom SDK Demo</h1>
+      <div id="connectionStatus" class="status disconnected">Disconnected</div>
+    </div>
+
+    <!-- Authentication Section -->
+    <div id="authSection" class="auth-section">
+      <h2>Authentication</h2>
+      <div class="form-group">
+        <label for="serverUrl">Server URL:</label>
+        <input type="text" id="serverUrl" value="daibo.ermis.network:9999" placeholder="server.com:9999">
+      </div>
+      <div class="form-group">
+        <label for="userId">User ID (Email):</label>
+        <input type="email" id="userId" placeholder="user@example.com">
+      </div>
+      <button id="loginBtn" class="btn">Login</button>
+      <button id="logoutBtn" class="btn secondary hidden">Logout</button>
+    </div>
+
+    <!-- Room Management Section -->
+    <div id="roomSection" class="room-section hidden">
+      <h2>Room Management</h2>
+      
+      <!-- Create Room -->
+      <div class="form-group">
+        <label for="roomName">Create New Room:</label>
+        <input type="text" id="roomName" placeholder="Room name">
+        <button id="createRoomBtn" class="btn">Create Room</button>
+      </div>
+
+      <!-- Join Room -->
+      <div class="form-group">
+        <label for="roomCode">Join Room by Code:</label>
+        <input type="text" id="roomCode" placeholder="xxxx-xxxx-xxxx">
+        <button id="joinRoomBtn" class="btn">Join Room</button>
+      </div>
+
+      <!-- Current Room Info -->
+      <div id="currentRoomInfo" class="hidden">
+        <h3>Current Room: <span id="currentRoomName"></span></h3>
+        <button id="leaveRoomBtn" class="btn danger">Leave Room</button>
+      </div>
+
+      <!-- Available Rooms -->
+      <h4>Available Rooms:</h4>
+      <button id="refreshRoomsBtn" class="btn secondary">Refresh Rooms</button>
+      <div id="roomList" class="room-list">
+        <div>Click Refresh to load rooms...</div>
+      </div>
+    </div>
+
+    <!-- Breakout Rooms Section -->
+    <div id="breakoutSection" class="breakout-rooms hidden">
+      <h3>Breakout Rooms</h3>
+      <div class="form-group">
+        <input type="text" id="subRoomName" placeholder="Breakout room name">
+        <button id="createSubRoomBtn" class="btn">Create Breakout Room</button>
+        <button id="returnToMainBtn" class="btn secondary hidden">Return to Main Room</button>
+      </div>
+      <div id="subRoomList" class="subroom-list"></div>
+    </div>
+
+    <!-- Meeting Area -->
+    <div id="meetingArea" class="meeting-area hidden">
+      <div class="video-container">
+        <div id="mainVideo" class="main-video">
+          <span>No video stream</span>
+        </div>
+      </div>
+      
+      <div class="sidebar-videos">
+        <h3>Participants</h3>
+        <ul id="participantList" class="participant-list"></ul>
+      </div>
+    </div>
+
+    <!-- Logs Section -->
+    <div class="logs">
+      <h3>SDK Logs</h3>
+      <button id="clearLogsBtn" class="btn secondary">Clear Logs</button>
+      <div id="logContainer" class="log-container"></div>
+    </div>
+  </div>
+
+  <!-- SDK Scripts (In a real implementation, these would be bundled) -->
+  <script type="module">
+    // Mock the SDK imports for demo purposes
+    // In real implementation, you would import from the built SDK bundle
+
+    const moduleUrl = '../dist/index.js?v=' + Date.now();
+  const { default: ErmisClassroom } = await import(moduleUrl);
+    const log = (msg) => {
+      document.getElementById('log').textContent += msg + '\n';
+    };
+    
+    // Simple EventEmitter implementation for demo
+    class EventEmitter {
+      constructor() {
+        this._events = new Map();
+      }
+      
+      on(event, listener) {
+        if (!this._events.has(event)) {
+          this._events.set(event, []);
+        }
+        this._events.get(event).push(listener);
+        return this;
+      }
+      
+      emit(event, ...args) {
+        if (!this._events.has(event)) return false;
+        this._events.get(event).forEach(listener => {
+          try {
+            listener(...args);
+          } catch (error) {
+            console.error(`Error in event listener for ${event}:`, error);
+          }
+        });
+        return true;
+      }
+    }
+
+    // Mock ErmisClassroom SDK for demo
+    class MockErmisClassroom extends EventEmitter {
+      constructor(config) {
+        super();
+        this.config = config;
+        this.isAuthenticated = false;
+        this.currentRoom = null;
+        this.participants = new Map();
+        this.subRooms = new Map();
+      }
+
+      static create(config) {
+        return new MockErmisClassroom(config);
+      }
+
+      async authenticate(userId) {
+        await this.delay(1000);
+        this.isAuthenticated = true;
+        this.userId = userId;
+        this.emit('authenticated', { userId });
+        return { id: userId, token: 'mock-token' };
+      }
+
+      async logout() {
+        this.isAuthenticated = false;
+        this.currentRoom = null;
+        this.participants.clear();
+        this.subRooms.clear();
+        this.emit('loggedOut');
+      }
+
+      async createRoom(config) {
+        await this.delay(800);
+        const room = {
+          id: 'room-' + Date.now(),
+          name: config.name,
+          code: this.generateRoomCode(),
+          type: config.type || 'main'
+        };
+        this.emit('roomCreated', { room });
+        return room;
+      }
+
+      async joinRoom(roomCode) {
+        await this.delay(1000);
+        const room = {
+          id: 'room-' + Date.now(),
+          name: 'Demo Room',
+          code: roomCode,
+          type: 'main'
+        };
+        
+        this.currentRoom = room;
+        
+        // Add some mock participants
+        const localParticipant = {
+          userId: this.userId,
+          isLocal: true,
+          isAudioEnabled: true,
+          isVideoEnabled: true,
+          isPinned: false,
+          role: 'owner'
+        };
+        
+        this.participants.set(this.userId, localParticipant);
+        
+        // Add some remote participants for demo
+        setTimeout(() => {
+          const remoteParticipant = {
+            userId: 'student@demo.com',
+            isLocal: false,
+            isAudioEnabled: true,
+            isVideoEnabled: true,
+            isPinned: false,
+            role: 'participant'
+          };
+          this.participants.set('student@demo.com', remoteParticipant);
+          this.emit('participantAdded', { participant: remoteParticipant });
+        }, 2000);
+
+        this.emit('roomJoined', { room, localParticipant, participants: [localParticipant] });
+        return { room, localParticipant, participants: [localParticipant] };
+      }
+
+      async leaveRoom() {
+        if (!this.currentRoom) return;
+        const room = this.currentRoom;
+        this.currentRoom = null;
+        this.participants.clear();
+        this.subRooms.clear();
+        this.emit('roomLeft', { room });
+      }
+
+      async getRooms() {
+        await this.delay(500);
+        return [
+          { id: '1', room_name: 'Math Class', room_code: 'abc1-def2-ghi3', room_type: 'main' },
+          { id: '2', room_name: 'Physics Lab', room_code: 'jkl4-mno5-pqr6', room_type: 'main' },
+          { id: '3', room_name: 'Discussion Group', room_code: 'stu7-vwx8-yz90', room_type: 'discussion' }
+        ];
+      }
+
+      async createSubRoom(config) {
+        await this.delay(600);
+        const subRoom = {
+          id: 'subroom-' + Date.now(),
+          name: config.name,
+          code: this.generateRoomCode(),
+          type: 'breakout',
+          parentRoomId: this.currentRoom?.id
+        };
+        
+        this.subRooms.set(subRoom.id, subRoom);
+        this.emit('subRoomCreated', { subRoom });
+        return subRoom;
+      }
+
+      async joinSubRoom(subRoomCode) {
+        await this.delay(800);
+        this.emit('subRoomJoined', { subRoomCode });
+        return { success: true };
+      }
+
+      async returnToMainRoom() {
+        await this.delay(600);
+        this.emit('returnedToMainRoom', { room: this.currentRoom });
+        return this.currentRoom;
+      }
+
+      generateRoomCode() {
+        const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        const segments = [];
+        for (let i = 0; i < 3; i++) {
+          let segment = '';
+          for (let j = 0; j < 4; j++) {
+            segment += chars.charAt(Math.floor(Math.random() * chars.length));
+          }
+          segments.push(segment);
+        }
+        return segments.join('-');
+      }
+
+      delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+      }
+
+      getState() {
+        return {
+          isAuthenticated: this.isAuthenticated,
+          currentRoom: this.currentRoom,
+          participantCount: this.participants.size
+        };
+      }
+    }
+
+    // Demo Application
+    class DemoApp {
+      constructor() {
+        this.client = null;
+        this.initializeUI();
+      }
+
+      initializeUI() {
+        // Get DOM elements
+        this.elements = {
+          connectionStatus: document.getElementById('connectionStatus'),
+          authSection: document.getElementById('authSection'),
+          roomSection: document.getElementById('roomSection'),
+          breakoutSection: document.getElementById('breakoutSection'),
+          meetingArea: document.getElementById('meetingArea'),
+          
+          serverUrl: document.getElementById('serverUrl'),
+          userId: document.getElementById('userId'),
+          loginBtn: document.getElementById('loginBtn'),
+          logoutBtn: document.getElementById('logoutBtn'),
+          
+          roomName: document.getElementById('roomName'),
+          roomCode: document.getElementById('roomCode'),
+          createRoomBtn: document.getElementById('createRoomBtn'),
+          joinRoomBtn: document.getElementById('joinRoomBtn'),
+          leaveRoomBtn: document.getElementById('leaveRoomBtn'),
+          refreshRoomsBtn: document.getElementById('refreshRoomsBtn'),
+          roomList: document.getElementById('roomList'),
+          
+          currentRoomInfo: document.getElementById('currentRoomInfo'),
+          currentRoomName: document.getElementById('currentRoomName'),
+          
+          subRoomName: document.getElementById('subRoomName'),
+          createSubRoomBtn: document.getElementById('createSubRoomBtn'),
+          returnToMainBtn: document.getElementById('returnToMainBtn'),
+          subRoomList: document.getElementById('subRoomList'),
+          
+          participantList: document.getElementById('participantList'),
+          logContainer: document.getElementById('logContainer'),
+          clearLogsBtn: document.getElementById('clearLogsBtn')
+        };
+
+        this.setupEventListeners();
+        this.updateConnectionStatus('disconnected');
+      }
+
+      setupEventListeners() {
+        // Auth buttons
+        this.elements.loginBtn.addEventListener('click', () => this.handleLogin());
+        this.elements.logoutBtn.addEventListener('click', () => this.handleLogout());
+
+        // Room buttons
+        this.elements.createRoomBtn.addEventListener('click', () => this.handleCreateRoom());
+        this.elements.joinRoomBtn.addEventListener('click', () => this.handleJoinRoom());
+        this.elements.leaveRoomBtn.addEventListener('click', () => this.handleLeaveRoom());
+        this.elements.refreshRoomsBtn.addEventListener('click', () => this.handleRefreshRooms());
+
+        // Sub room buttons
+        this.elements.createSubRoomBtn.addEventListener('click', () => this.handleCreateSubRoom());
+        this.elements.returnToMainBtn.addEventListener('click', () => this.handleReturnToMain());
+
+        // Other buttons
+        this.elements.clearLogsBtn.addEventListener('click', () => this.clearLogs());
+
+        // Enter key handlers
+        this.elements.userId.addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') this.handleLogin();
+        });
+
+        this.elements.roomName.addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') this.handleCreateRoom();
+        });
+
+        this.elements.roomCode.addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') this.handleJoinRoom();
+        });
+
+        this.elements.subRoomName.addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') this.handleCreateSubRoom();
+        });
+      }
+
+      async handleLogin() {
+        const serverUrl = this.elements.serverUrl.value.trim();
+        const userId = this.elements.userId.value.trim();
+
+        if (!serverUrl || !userId) {
+          this.log('Please enter both server URL and user ID', 'error');
+          return;
+        }
+
+        if (!userId.includes('@')) {
+          this.log('Please enter a valid email address', 'error');
+          return;
+        }
+
+        try {
+          this.elements.loginBtn.disabled = true;
+          this.elements.loginBtn.textContent = 'Connecting...';
+          this.updateConnectionStatus('connecting');
+
+          // Create client
+          this.client = ErmisClassroom.create({
+            host: serverUrl,
+            debug: true
+          });
+
+          // Setup event listeners
+          this.setupSDKEventListeners();
+
+          // Authenticate
+          await this.client.authenticate(userId);
+
+          this.log(`Successfully authenticated as ${userId}`, 'success');
+          this.updateConnectionStatus('connected');
+          this.showSection('room');
+
+          // Load available rooms
+          this.handleRefreshRooms();
+
+        } catch (error) {
+          this.log(`Authentication failed: ${error.message}`, 'error');
+          this.updateConnectionStatus('disconnected');
+        } finally {
+          this.elements.loginBtn.disabled = false;
+          this.elements.loginBtn.textContent = 'Login';
+        }
+      }
+
+      async handleLogout() {
+        if (!this.client) return;
+
+        try {
+          await this.client.logout();
+          this.log('Logged out successfully', 'info');
+          this.updateConnectionStatus('disconnected');
+          this.showSection('auth');
+          this.clearParticipants();
+          this.clearSubRooms();
+        } catch (error) {
+          this.log(`Logout failed: ${error.message}`, 'error');
+        }
+      }
+
+      async handleCreateRoom() {
+        if (!this.client) return;
+
+        const roomName = this.elements.roomName.value.trim();
+        if (!roomName) {
+          this.log('Please enter a room name', 'error');
+          return;
+        }
+
+        try {
+          this.elements.createRoomBtn.disabled = true;
+          this.elements.createRoomBtn.textContent = 'Creating...';
+
+          const room = await this.client.createRoom({
+            name: roomName,
+            type: 'main'
+          });
+
+          this.log(`Room created: ${room.name} (${room.code})`, 'success');
+          this.elements.roomName.value = '';
+
+          // Auto-join the created room
+          await this.joinRoomByCode(room.code);
+
+        } catch (error) {
+          this.log(`Failed to create room: ${error.message}`, 'error');
+        } finally {
+          this.elements.createRoomBtn.disabled = false;
+          this.elements.createRoomBtn.textContent = 'Create Room';
+        }
+      }
+
+      async handleJoinRoom() {
+        const roomCode = this.elements.roomCode.value.trim();
+        if (!roomCode) {
+          this.log('Please enter a room code', 'error');
+          return;
+        }
+
+        await this.joinRoomByCode(roomCode);
+      }
+
+      async joinRoomByCode(roomCode) {
+        if (!this.client) return;
+
+        try {
+          this.elements.joinRoomBtn.disabled = true;
+          this.elements.joinRoomBtn.textContent = 'Joining...';
+
+          const result = await this.client.joinRoom(roomCode);
+          
+          this.log(`Joined room: ${result.room.name}`, 'success');
+          this.elements.roomCode.value = '';
+          this.elements.currentRoomName.textContent = result.room.name;
+          
+          this.showSection('meeting');
+
+        } catch (error) {
+          this.log(`Failed to join room: ${error.message}`, 'error');
+        } finally {
+          this.elements.joinRoomBtn.disabled = false;
+          this.elements.joinRoomBtn.textContent = 'Join Room';
+        }
+      }
+
+      async handleLeaveRoom() {
+        if (!this.client) return;
+
+        try {
+          await this.client.leaveRoom();
+          this.log('Left room successfully', 'info');
+          this.showSection('room');
+          this.clearParticipants();
+          this.clearSubRooms();
+        } catch (error) {
+          this.log(`Failed to leave room: ${error.message}`, 'error');
+        }
+      }
+
+      async handleRefreshRooms() {
+        if (!this.client) return;
+
+        try {
+          this.elements.refreshRoomsBtn.disabled = true;
+          this.elements.refreshRoomsBtn.textContent = 'Loading...';
+
+          const rooms = await this.client.getRooms();
+          this.displayRooms(rooms);
+          this.log(`Loaded ${rooms.length} rooms`, 'info');
+
+        } catch (error) {
+          this.log(`Failed to load rooms: ${error.message}`, 'error');
+        } finally {
+          this.elements.refreshRoomsBtn.disabled = false;
+          this.elements.refreshRoomsBtn.textContent = 'Refresh Rooms';
+        }
+      }
+
+      async handleCreateSubRoom() {
+        if (!this.client) return;
+
+        const subRoomName = this.elements.subRoomName.value.trim();
+        if (!subRoomName) {
+          this.log('Please enter a breakout room name', 'error');
+          return;
+        }
+
+        try {
+          this.elements.createSubRoomBtn.disabled = true;
+          this.elements.createSubRoomBtn.textContent = 'Creating...';
+
+          const subRoom = await this.client.createSubRoom({
+            name: subRoomName,
+            maxParticipants: 5
+          });
+
+          this.log(`Breakout room created: ${subRoom.name}`, 'success');
+          this.elements.subRoomName.value = '';
+          this.displaySubRoom(subRoom);
+
+        } catch (error) {
+          this.log(`Failed to create breakout room: ${error.message}`, 'error');
+        } finally {
+          this.elements.createSubRoomBtn.disabled = false;
+          this.elements.createSubRoomBtn.textContent = 'Create Breakout Room';
+        }
+      }
+
+      async handleReturnToMain() {
+        if (!this.client) return;
+
+        try {
+          await this.client.returnToMainRoom();
+          this.log('Returned to main room', 'success');
+        } catch (error) {
+          this.log(`Failed to return to main room: ${error.message}`, 'error');
+        }
+      }
+
+      setupSDKEventListeners() {
+        if (!this.client) return;
+
+        // Authentication events
+        this.client.on('authenticated', ({ userId }) => {
+          this.log(`Authenticated: ${userId}`, 'success');
+        });
+
+        this.client.on('loggedOut', () => {
+          this.log('Logged out', 'info');
+        });
+
+        // Room events
+        this.client.on('roomCreated', ({ room }) => {
+          this.log(`Room created: ${room.name}`, 'success');
+        });
+
+        this.client.on('roomJoined', ({ room }) => {
+          this.log(`Joined room: ${room.name}`, 'success');
+        });
+
+        this.client.on('roomLeft', ({ room }) => {
+          this.log(`Left room: ${room.name}`, 'info');
+        });
+
+        // Participant events
+        this.client.on('participantAdded', ({ participant }) => {
+          this.log(`Participant joined: ${participant.userId}`, 'info');
+          this.displayParticipant(participant);
+        });
+
+        this.client.on('participantRemoved', ({ participant }) => {
+          this.log(`Participant left: ${participant.userId}`, 'info');
+          this.removeParticipant(participant.userId);
+        });
+
+        // Sub room events
+        this.client.on('subRoomCreated', ({ subRoom }) => {
+          this.log(`Breakout room created: ${subRoom.name}`, 'success');
+          this.displaySubRoom(subRoom);
+        });
+
+        this.client.on('subRoomJoined', ({ subRoomCode }) => {
+          this.log(`Joined breakout room: ${subRoomCode}`, 'success');
+        });
+
+        this.client.on('returnedToMainRoom', () => {
+          this.log('Returned to main room', 'success');
+        });
+
+        // Error events
+        this.client.on('error', ({ error, action }) => {
+          this.log(`Error in ${action}: ${error.message}`, 'error');
+        });
+      }
+
+      displayRooms(rooms) {
+        const container = this.elements.roomList;
+        container.innerHTML = '';
+
+        if (rooms.length === 0) {
+          container.innerHTML = '<div style="padding: 10px; color: #666;">No rooms available</div>';
+          return;
+        }
+
+        rooms.forEach(room => {
+          const roomElement = document.createElement('div');
+          roomElement.className = 'room-item';
+          roomElement.innerHTML = `
+            <div><strong>${room.room_name}</strong></div>
+            <div>Code: <span class="room-code">${room.room_code}</span></div>
+            <div style="font-size: 12px; color: #666;">Type: ${room.room_type}</div>
+          `;
+          
+          roomElement.addEventListener('click', () => {
+            this.elements.roomCode.value = room.room_code;
+            this.handleJoinRoom();
+          });
+
+          container.appendChild(roomElement);
+        });
+      }
+
+      displayParticipant(participant) {
+        const container = this.elements.participantList;
+        const existingItem = document.getElementById(`participant-${participant.userId}`);
+        
+        if (existingItem) {
+          existingItem.remove();
+        }
+
+        const participantElement = document.createElement('li');
+        participantElement.id = `participant-${participant.userId}`;
+        participantElement.className = `participant-item ${participant.isLocal ? 'local' : ''} ${participant.isPinned ? 'pinned' : ''}`;
+        
+        const displayName = participant.isLocal ? `${participant.userId} (You)` : participant.userId;
+        const roleText = participant.role === 'owner' ? ' 👑' : '';
+        
+        participantElement.innerHTML = `
+          <div>
+            <strong>${displayName}${roleText}</strong>
+            <div style="font-size: 11px; color: #666;">${participant.role}</div>
+          </div>
+          <div class="participant-controls">
+            <button class="control-btn ${participant.isAudioEnabled ? '' : 'muted'}" 
+                    onclick="demo.toggleParticipantAudio('${participant.userId}')">
+              ${participant.isAudioEnabled ? '🎤' : '🔇'}
+            </button>
+            <button class="control-btn" onclick="demo.toggleParticipantPin('${participant.userId}')">
+              ${participant.isPinned ? '📌' : '📍'}
+            </button>
+          </div>
+        `;
+
+        container.appendChild(participantElement);
+      }
+
+      removeParticipant(userId) {
+        const participantElement = document.getElementById(`participant-${userId}`);
+        if (participantElement) {
+          participantElement.remove();
+        }
+      }
+
+      clearParticipants() {
+        this.elements.participantList.innerHTML = '';
+      }
+
+      displaySubRoom(subRoom) {
+        const container = this.elements.subRoomList;
+        const subRoomElement = document.createElement('div');
+        subRoomElement.className = 'subroom-item';
+        subRoomElement.innerHTML = `
+          <div><strong>${subRoom.name}</strong></div>
+          <div class="room-code">${subRoom.code}</div>
+        `;
+
+        subRoomElement.addEventListener('click', async () => {
+          try {
+            await this.client.joinSubRoom(subRoom.code);
+            this.log(`Joined breakout room: ${subRoom.name}`, 'success');
+            
+            // Update UI
+            document.querySelectorAll('.subroom-item').forEach(el => el.classList.remove('active'));
+            subRoomElement.classList.add('active');
+            this.elements.returnToMainBtn.classList.remove('hidden');
+            
+          } catch (error) {
+            this.log(`Failed to join breakout room: ${error.message}`, 'error');
+          }
+        });
+
+        container.appendChild(subRoomElement);
+      }
+
+      clearSubRooms() {
+        this.elements.subRoomList.innerHTML = '';
+        this.elements.returnToMainBtn.classList.add('hidden');
+      }
+
+      toggleParticipantAudio(userId) {
+        // Mock implementation - in real SDK this would call participant methods
+        this.log(`Toggle audio for ${userId}`, 'info');
+        
+        const participant = this.client?.participants?.get(userId);
+        if (participant) {
+          participant.isAudioEnabled = !participant.isAudioEnabled;
+          this.displayParticipant(participant);
+        }
+      }
+
+      toggleParticipantPin(userId) {
+        // Mock implementation - in real SDK this would call participant methods
+        this.log(`Toggle pin for ${userId}`, 'info');
+        
+        if (this.client?.participants) {
+          // Unpin all others
+          this.client.participants.forEach(p => p.isPinned = false);
+          
+          // Pin this one
+          const participant = this.client.participants.get(userId);
+          if (participant) {
+            participant.isPinned = !participant.isPinned;
+            
+            // Update all participant displays
+            this.client.participants.forEach(p => this.displayParticipant(p));
+          }
+        }
+      }
+
+      updateConnectionStatus(status) {
+        const statusElement = this.elements.connectionStatus;
+        statusElement.className = `status ${status}`;
+        
+        switch (status) {
+          case 'disconnected':
+            statusElement.textContent = 'Disconnected';
+            break;
+          case 'connecting':
+            statusElement.textContent = 'Connecting...';
+            break;
+          case 'connected':
+            statusElement.textContent = 'Connected';
+            break;
+          default:
+            statusElement.textContent = status;
+        }
+      }
+
+      showSection(section) {
+        // Hide all sections
+        this.elements.authSection.classList.add('hidden');
+        this.elements.roomSection.classList.add('hidden');
+        this.elements.breakoutSection.classList.add('hidden');
+        this.elements.meetingArea.classList.add('hidden');
+        
+        this.elements.loginBtn.classList.toggle('hidden', section !== 'auth');
+        this.elements.logoutBtn.classList.toggle('hidden', section === 'auth');
+        this.elements.currentRoomInfo.classList.add('hidden');
+
+        // Show appropriate sections
+        switch (section) {
+          case 'auth':
+            this.elements.authSection.classList.remove('hidden');
+            break;
+          case 'room':
+            this.elements.roomSection.classList.remove('hidden');
+            break;
+          case 'meeting':
+            this.elements.roomSection.classList.remove('hidden');
+            this.elements.breakoutSection.classList.remove('hidden');
+            this.elements.meetingArea.classList.remove('hidden');
+            this.elements.currentRoomInfo.classList.remove('hidden');
+            break;
+        }
+      }
+
+      log(message, type = 'info') {
+        const container = this.elements.logContainer;
+        const logEntry = document.createElement('div');
+        logEntry.className = `log-entry ${type}`;
+        
+        const timestamp = new Date().toLocaleTimeString();
+        const typeIcon = {
+          'info': 'ℹ️',
+          'success': '✅',
+          'error': '❌',
+          'warning': '⚠️'
+        }[type] || 'ℹ️';
+        
+        logEntry.innerHTML = `[${timestamp}] ${typeIcon} ${message}`;
+        
+        container.appendChild(logEntry);
+        container.scrollTop = container.scrollHeight;
+
+        // Keep only last 100 log entries
+        while (container.children.length > 100) {
+          container.removeChild(container.firstChild);
+        }
+      }
+
+      clearLogs() {
+        this.elements.logContainer.innerHTML = '';
+      }
+    }
+
+    // Global demo instance for onclick handlers
+    window.demo = new DemoApp();
+
+    // Add some demo data on load
+    document.addEventListener('DOMContentLoaded', () => {
+      demo.log('Ermis Classroom SDK Demo loaded', 'success');
+      demo.log('Enter your server details and user ID to get started', 'info');
+      
+      // Pre-fill demo data
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        demo.elements.userId.value = 'demo-user@example.com';
+        demo.log('Demo credentials pre-filled for local testing', 'info');
+      }
+    });
+
+    // Simulate some real-time events for demo purposes
+    setTimeout(() => {
+      if (demo.client && demo.client.isAuthenticated && demo.client.currentRoom) {
+        // Simulate participant joining/leaving
+        const events = [
+          () => {
+            const newParticipant = {
+              userId: 'alice@demo.com',
+              isLocal: false,
+              isAudioEnabled: true,
+              isVideoEnabled: true,
+              isPinned: false,
+              role: 'participant'
+            };
+            demo.client.participants.set('alice@demo.com', newParticipant);
+            demo.client.emit('participantAdded', { participant: newParticipant });
+          },
+          () => {
+            const participant = demo.client.participants.get('student@demo.com');
+            if (participant) {
+              participant.isAudioEnabled = false;
+              demo.displayParticipant(participant);
+              demo.log('student@demo.com muted their microphone', 'info');
+            }
+          },
+          () => {
+            const participant = demo.client.participants.get('alice@demo.com');
+            if (participant) {
+              demo.client.participants.delete('alice@demo.com');
+              demo.client.emit('participantRemoved', { participant });
+            }
+          }
+        ];
+
+        // Trigger random events
+        events.forEach((event, index) => {
+          setTimeout(event, (index + 1) * 10000); // 10s, 20s, 30s intervals
+        });
+      }
+    }, 5000);
+
+  </script>
+</body>
+</html>

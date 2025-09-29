@@ -1,0 +1,1571 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ermis meeting sample</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+  <link rel="stylesheet" href="index.css">
+  <style>
+  </style>
+</head>
+
+<body>
+  <!-- Login Overlay -->
+  <div class="login-overlay" id="loginOverlay">
+    <div class="login-form">
+      <h2 class="login-title">Welcome to Ermis Meeting</h2>
+      <p class="login-subtitle">Please enter your email to continue</p>
+      <input type="email" id="emailInput" class="login-input" placeholder="Enter your email address" required />
+      <button class="login-btn" id="loginBtn">Join Meeting Platform</button>
+    </div>
+  </div>
+
+  <div class="app-header">
+    <h1 class="app-title">Ermis Meeting Demo</h1>
+    <div id="userInfo">
+      User: <span id="currentUser">Not logged in</span>
+      <button class="btn" id="logoutBtn" style="margin-left: 1rem; padding: 0.5rem 1rem; font-size: 0.9rem">
+        Logout
+      </button>
+    </div>
+  </div>
+
+  <div class="main-container">
+    <div class="sidebar">
+      <div class="control-section">
+        <div class="control-title">Create New Room</div>
+        <div class="form-group">
+          <label for="roomName">Room Name</label>
+          <input type="text" id="roomName" placeholder="Enter room name" />
+        </div>
+        <button class="btn btn-primary" id="createRoomBtn">
+          Create Room
+        </button>
+      </div>
+
+      <div class="control-section">
+        <div class="control-title">Join by Room Code</div>
+        <div class="form-group">
+          <label for="roomCode">Room Code</label>
+          <input type="text" id="roomCode" placeholder="e.g., 5f8k-vgnx-smsw" />
+        </div>
+        <button class="btn" id="joinRoomBtn">Join Room</button>
+      </div>
+
+      <div class="current-room-info" id="currentRoomInfo">
+        <div class="current-room-name" id="currentRoomName"></div>
+        <div class="members-count" id="membersCount"></div>
+        <button class="btn leave-btn" id="leaveRoomBtn">Leave Room</button>
+      </div>
+
+      <div class="control-section">
+        <div class="control-title">Available Rooms</div>
+        <div class="room-list" id="roomList">
+          <div class="loading">Loading rooms...</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="meeting-area">
+      <div id="welcomeMessage" class="welcome-message">
+        Create a new room or join an existing one to start your meeting
+      </div>
+      <div class="meeting-container" id="meetingContainer"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    const { Publisher } = await import(`./publisher.js?t=${Date.now()}`);
+    // const { Subscriber } = await import(`./subscriber.js?t=${Date.now()}`);
+
+    // Configuration
+    const HOST = "daibo.ermis.network:9999";
+    const API_BASE_URL = `https://${HOST}/meeting`;
+    const WEBTP_BASE_URL =
+      "https://daibo.ermis.network:4455/meeting/wt";
+
+    // User info - will be set after login
+    let currentUserId = null;
+
+    // DOM Elements
+    const loginOverlay = document.getElementById("loginOverlay");
+    const emailInput = document.getElementById("emailInput");
+    const loginBtn = document.getElementById("loginBtn");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const currentUser = document.getElementById("currentUser");
+    const createRoomBtn = document.getElementById("createRoomBtn");
+    const roomNameInput = document.getElementById("roomName");
+    const roomCodeInput = document.getElementById("roomCode");
+    const joinRoomBtn = document.getElementById("joinRoomBtn");
+    const roomList = document.getElementById("roomList");
+    const meetingContainer = document.getElementById("meetingContainer");
+    const welcomeMessage = document.getElementById("welcomeMessage");
+    const currentRoomInfo = document.getElementById("currentRoomInfo");
+    const currentRoomName = document.getElementById("currentRoomName");
+    const membersCount = document.getElementById("membersCount");
+    const leaveRoomBtn = document.getElementById("leaveRoomBtn");
+
+    // State
+    let currentRoom = null;
+    let currentRoomId = null;
+    let myStreamId = null;
+    let myMembershipId = null;
+    let members = [];
+    let subscribers = [];
+    let publisher = null;
+
+    let pinnedVideoId = null; // To track the pinned video
+
+    const storage = {
+      getItem: (key) => {
+        return localStorage.getItem(key);
+      },
+      setItem: (key, value) => {
+        localStorage.setItem(key, value);
+      },
+      removeItem: (key) => {
+        localStorage.removeItem(key);
+      },
+    };
+
+    // Authentication Functions
+    function saveUserEmail(email) {
+      storage.setItem("userEmail", email);
+      currentUserId = email;
+    }
+
+    function getSavedUserEmail() {
+      console.log("Retrieving saved userEmail");
+      return storage.getItem("userEmail");
+    }
+
+    function clearUserEmail() {
+      storage.removeItem("userEmail");
+      currentUserId = null;
+    }
+
+    function validateEmail(email) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      return emailRegex.test(email);
+    }
+
+    function showLoginOverlay() {
+      loginOverlay.classList.remove("hidden");
+      emailInput.focus();
+    }
+
+    function hideLoginOverlay() {
+      loginOverlay.classList.add("hidden");
+    }
+
+    function updateUserUI() {
+      if (currentUserId) {
+        currentUser.textContent = currentUserId;
+        hideLoginOverlay();
+      } else {
+        currentUser.textContent = "Not logged in";
+        showLoginOverlay();
+      }
+    }
+
+    // Login Event Handlers
+    async function handleLogin() {
+      const email = emailInput.value.trim();
+
+      if (!email) {
+        showError("Please enter your email address");
+        emailInput.focus();
+        return;
+      }
+
+      if (!validateEmail(email)) {
+        showError("Please enter a valid email address");
+        emailInput.focus();
+        return;
+      }
+
+      try {
+        loginBtn.textContent = "Logging in...";
+        loginBtn.disabled = true;
+
+        // Save email and update UI
+        saveUserEmail(email);
+        updateUserUI();
+        if (!storage.getItem("jwtToken")) {
+          await updateToken();
+        }
+
+        // Load rooms after successful login
+        await loadRooms();
+
+        showSuccess(`Welcome, ${email}!`);
+      } catch (error) {
+        showError("Login failed: " + error.message);
+      } finally {
+        loginBtn.textContent = "Join Meeting Platform";
+        loginBtn.disabled = false;
+      }
+    }
+
+    function handleLogout() {
+      // Leave current meeting if any
+      if (currentRoomId) {
+        leaveMeeting();
+      }
+
+      // Clear user data
+      clearUserEmail();
+      updateUserUI();
+
+      // Clear room list
+      roomList.innerHTML =
+        '<div class="loading">Please login to view rooms</div>';
+
+      showSuccess("Logged out successfully");
+    }
+    // API Functions
+    async function apiCall(endpoint, method = "GET", body = null) {
+      if (!currentUserId) {
+        throw new Error("Please login first");
+      }
+
+      const JWT_TOKEN = storage.getItem("jwtToken");
+
+      if (!JWT_TOKEN) {
+        throw new Error("JWT token not found");
+      }
+
+      const options = {
+        method,
+        headers: {
+          Authorization: `Bearer ${JWT_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+      };
+
+      if (body) {
+        options.body = JSON.stringify(body);
+      }
+
+      try {
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return await response.json();
+      } catch (error) {
+        console.error("API call failed:", error);
+        throw error;
+      }
+    }
+
+    async function createRoom(roomName) {
+      return await apiCall("/rooms", "POST", {
+        room_name: roomName,
+        room_type: "main",
+      });
+    }
+
+    async function listRooms() {
+      return await apiCall("/rooms/list", "POST", {
+        list_query: {
+          page: 1,
+          per_page: 20,
+          sort_by: "created_at",
+          sort_order: "desc",
+        },
+        conditions: {
+          is_active: true,
+        },
+      });
+    }
+
+    async function getRoomById(roomId) {
+      return await apiCall(`/rooms/${roomId}`);
+    }
+
+    async function joinRoom(roomCode) {
+      return await apiCall("/rooms/join", "POST", {
+        room_code: roomCode,
+        app_name: "Ermis-Meeting",
+      });
+    }
+
+    async function getDummyToken() {
+      const endpoint = "/get-token";
+      const options = {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ sub: currentUserId }),
+      };
+
+      try {
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return await response.json();
+      } catch (error) {
+        console.error("API call failed:", error);
+        throw error;
+      }
+    }
+
+    async function updateToken() {
+      try {
+        const tokenResponse = await getDummyToken();
+        console.log("Received new token:", tokenResponse); // Uncomment if token changes
+        storage.setItem("jwtToken", tokenResponse.access_token);
+      } catch (error) {
+        console.error("Failed to update token:", error);
+      }
+    }
+
+    // Audio Mixer Class for combining multiple subscriber audio streams (Updated)
+    class AudioMixer {
+      constructor() {
+        this.audioContext = null;
+        this.mixerNode = null;
+        this.outputDestination = null;
+        this.subscriberNodes = new Map();
+        this.isInitialized = false;
+        this.outputAudioElement = null; // For mixed audio playback
+      }
+
+      async initialize() {
+        if (this.isInitialized) return;
+
+        try {
+          // Create shared AudioContext
+          this.audioContext = new (window.AudioContext ||
+            window.webkitAudioContext)();
+
+          // Create mixer node (GainNode to combine audio)
+          this.mixerNode = this.audioContext.createGain();
+          this.mixerNode.gain.value = 0.8; // Slightly lower to prevent clipping
+
+          // Create output destination
+          this.outputDestination =
+            this.audioContext.createMediaStreamDestination();
+          this.mixerNode.connect(this.outputDestination);
+
+          // Create hidden audio element for playback
+          this.outputAudioElement = document.createElement("audio");
+          this.outputAudioElement.autoplay = true;
+          this.outputAudioElement.style.display = "none";
+          document.body.appendChild(this.outputAudioElement);
+
+          this.isInitialized = true;
+          console.log("AudioMixer initialized");
+        } catch (error) {
+          console.error("Failed to initialize AudioMixer:", error);
+          throw error;
+        }
+      }
+
+      async addSubscriber(
+        subscriberId,
+        audioWorkletUrl,
+        isOwnAudio = false,
+        channelWorkletPort
+      ) {
+        if (!this.isInitialized) {
+          await this.initialize();
+        }
+
+        // Skip adding own audio to prevent echo/feedback
+        if (isOwnAudio) {
+          console.log(
+            `Skipping own audio for subscriber ${subscriberId} to prevent echo`
+          );
+          return null;
+        }
+
+        try {
+          // Load audio worklet if not already loaded
+          try {
+            await this.audioContext.audioWorklet.addModule(audioWorkletUrl);
+          } catch (error) {
+            // Worklet might already be loaded, ignore error
+            console.log(
+              "Audio worklet already loaded or failed to load:",
+              error.message
+            );
+          }
+
+          // Create AudioWorkletNode for this subscriber
+          const workletNode = new AudioWorkletNode(
+            this.audioContext,
+            "jitter-resistant-processor"
+          );
+
+          workletNode.port.postMessage(
+            { type: "connectWorker", port: channelWorkletPort },
+            [channelWorkletPort]
+          );
+
+          // Connect to mixer
+          workletNode.connect(this.mixerNode);
+
+          // Store reference
+          this.subscriberNodes.set(subscriberId, workletNode);
+
+          // Update audio element source with mixed stream
+          this.outputAudioElement.srcObject = this.outputDestination.stream;
+
+          console.log(`Added subscriber ${subscriberId} to audio mixer`);
+          return workletNode;
+        } catch (error) {
+          console.error(
+            `Failed to add subscriber ${subscriberId} to mixer:`,
+            error
+          );
+          throw error;
+        }
+      }
+
+      removeSubscriber(subscriberId) {
+        const workletNode = this.subscriberNodes.get(subscriberId);
+        if (workletNode) {
+          try {
+            workletNode.disconnect();
+            this.subscriberNodes.delete(subscriberId);
+
+            // Update audio element if no more subscribers
+            if (this.subscriberNodes.size === 0 && this.outputAudioElement) {
+              this.outputAudioElement.srcObject = null;
+            }
+
+            console.log(
+              `Removed subscriber ${subscriberId} from audio mixer`
+            );
+          } catch (error) {
+            console.error(
+              `Failed to remove subscriber ${subscriberId}:`,
+              error
+            );
+          }
+        }
+      }
+
+      getOutputMediaStream() {
+        if (!this.outputDestination) return null;
+        return this.outputDestination.stream;
+      }
+
+      setVolume(volume) {
+        if (this.mixerNode) {
+          this.mixerNode.gain.value = Math.max(0, Math.min(1, volume));
+        }
+      }
+
+      async cleanup() {
+        // Remove audio element
+        if (this.outputAudioElement) {
+          this.outputAudioElement.srcObject = null;
+          if (this.outputAudioElement.parentNode) {
+            this.outputAudioElement.parentNode.removeChild(
+              this.outputAudioElement
+            );
+          }
+          this.outputAudioElement = null;
+        }
+
+        // Disconnect all subscribers
+        for (const [subscriberId, workletNode] of this.subscriberNodes) {
+          try {
+            workletNode.disconnect();
+          } catch (error) {
+            console.error(
+              `Error disconnecting subscriber ${subscriberId}:`,
+              error
+            );
+          }
+        }
+        this.subscriberNodes.clear();
+
+        // Close audio context
+        if (this.audioContext && this.audioContext.state !== "closed") {
+          try {
+            await this.audioContext.close();
+          } catch (error) {
+            console.error("Error closing AudioContext:", error);
+          }
+        }
+
+        this.audioContext = null;
+        this.mixerNode = null;
+        this.outputDestination = null;
+        this.isInitialized = false;
+        console.log("AudioMixer cleaned up");
+      }
+    }
+
+    // Global audio mixer instance
+    let globalAudioMixer = null;
+
+    // Enhanced Subscriber class that uses shared media worker
+    class EnhancedSubscriber {
+      constructor(options) {
+        this.streamId = options.streamId || "";
+        this.roomId = options.roomId || "";
+        this.host = options.host || "stream-gate.bandia.vn";
+        this.videoElement = options.videoElement;
+        this.statusCallback = options.onStatus || (() => { });
+        this.mediaWorkerUrl = options.mediaWorkerUrl || "media-worker.js";
+        this.audioWorkletUrl = options.audioWorkletUrl || "audio-worklet1.js";
+        this.mstgPolyfillUrl = options.mstgPolyfillUrl || "MSTG_polyfill.js";
+        this.isOwnStream = options.isOwnStream || false; // New flag
+
+        this.audioWorkletNode = null;
+        this.videoGenerator = null;
+        this.videoWriter = null;
+        this.mediaStream = null;
+        this.worker = null;
+        this.subscriberId = `subscriber_${this.streamId}_${Date.now()}`;
+      }
+
+      async start() {
+        const channel = new MessageChannel();
+        try {
+          await this._loadPolyfill();
+          await this._initWorker(channel.port2);
+          await this._initAudioSystem(channel.port1);
+          this._initVideoSystem();
+          // this._startStream(channel.port2);
+          this._status("Subscriber started successfully");
+        } catch (error) {
+          this._status(`Failed to start subscriber: ${error.message}`, true);
+          throw error;
+        }
+      }
+
+      async _loadPolyfill() {
+        if (!window.MediaStreamTrackGenerator) {
+          try {
+            await import(this.mstgPolyfillUrl);
+          } catch (error) {
+            console.warn("Failed to load MSTG polyfill:", error);
+          }
+        }
+      }
+
+      async _initWorker(channelPort) {
+        try {
+          this.worker = new Worker(`media-worker.js?t=${Date.now()}`, {
+            type: "module",
+          });
+
+          this.worker.onmessage = (e) => {
+            this.handleWorkerMessage(e);
+          };
+          this.worker.onerror = (error) => {
+            this._status(`Media Worker error: ${error.message}`, true);
+          };
+          const mediaUrl = `wss://${this.host}/meeting/${this.roomId}/${this.streamId}`;
+          this.worker.postMessage(
+            {
+              type: "init",
+              data: {
+                mediaUrl,
+              },
+              port: channelPort,
+            },
+            [channelPort]
+          );
+        } catch (error) {
+          this._status(
+            `worker initialization failed: ${error.message}`,
+            true
+          );
+          throw error;
+        }
+      }
+
+      async _initAudioSystem(channelPort) {
+        try {
+          // Initialize global audio mixer if not exists
+          if (!globalAudioMixer) {
+            globalAudioMixer = new AudioMixer();
+            await globalAudioMixer.initialize();
+          }
+
+          // Add this subscriber to the mixer (skip if own stream to prevent echo)
+          this.audioWorkletNode = await globalAudioMixer.addSubscriber(
+            this.subscriberId,
+            this.audioWorkletUrl,
+            this.isOwnStream,
+            channelPort
+          );
+
+          // Setup message handler only if worklet node was created
+          if (this.audioWorkletNode) {
+            this.audioWorkletNode.port.onmessage = (event) => {
+              const { type, bufferMs, isPlaying, newBufferSize } = event.data;
+              // Handle buffer status if needed
+            };
+            this._status("Audio system initialized with shared mixer");
+          } else {
+            this._status(
+              "Audio system skipped (own stream - preventing echo)"
+            );
+          }
+        } catch (error) {
+          this._status(
+            `Audio system initialization failed: ${error.message}`,
+            true
+          );
+          throw error;
+        }
+      }
+
+      _initVideoSystem() {
+        try {
+          if (typeof MediaStreamTrackGenerator === "function") {
+            this.videoGenerator = new MediaStreamTrackGenerator({
+              kind: "video",
+            });
+          } else {
+            throw new Error(
+              "MediaStreamTrackGenerator not supported in this browser"
+            );
+          }
+          this.videoWriter = this.videoGenerator.writable;
+
+          // Create MediaStream with video track only
+          this.mediaStream = new MediaStream([this.videoGenerator]);
+
+          if (this.videoElement) {
+            this.videoElement.srcObject = this.mediaStream;
+          }
+
+          this._status("Video system initialized");
+        } catch (error) {
+          this._status(
+            `Video system initialization failed: ${error.message}`,
+            true
+          );
+          throw error;
+        }
+      }
+
+      handleWorkerMessage(e) {
+        const {
+          type,
+          frame,
+          message,
+          channelData,
+          sampleRate,
+          numberOfChannels,
+          timeStamp,
+          subscriberId,
+          audioEnabled
+        } = e.data;
+
+        switch (type) {
+          case "videoData":
+            this._handleVideoData(frame);
+            break;
+          case "status":
+            this._status(message);
+            break;
+          case "error":
+            this._status(message, true);
+            break;
+          case "skipping":
+            // Handle if needed
+            break;
+          case "audio-toggled":
+            console.log(`Audio ${audioEnabled ? "enabled" : "disabled"} for subscriber ${subscriberId}`);
+            break;
+          case "resuming":
+            // Handle if needed
+            break;
+        }
+      }
+
+      async _handleVideoData(frame) {
+        if (this.videoWriter && frame) {
+          try {
+            const writer = this.videoWriter.getWriter();
+            await writer.write(frame);
+            writer.releaseLock();
+          } catch (error) {
+            this._status(`Video write error: ${error.message}`, true);
+          }
+        }
+      }
+
+      _status(msg, isError = false) {
+        if (this.statusCallback) {
+          this.statusCallback(msg, isError);
+        }
+      }
+
+      async toggleAudio() {
+        this.worker.postMessage({ type: "toggle-audio" });
+
+      }
+
+
+      stop() {
+        try {
+          // Remove from audio mixer
+          if (globalAudioMixer) {
+            globalAudioMixer.removeSubscriber(this.subscriberId);
+          }
+
+          // Terminate worker if any
+          try {
+            if (this.worker) {
+              this.worker.terminate();
+              this.worker = null;
+            }
+          } catch (e) {
+            console.warn("Error terminating worker:", e);
+          }
+
+          // Close video writer / generator
+          try {
+            if (this.videoWriter) {
+              // release writer lock and close underlying writer if possible
+              // getWriter may throw if already released; wrap in try
+              try {
+                const writer = this.videoWriter.getWriter();
+                writer.releaseLock();
+              } catch (e) { }
+              this.videoWriter = null;
+            }
+            if (this.videoGenerator) {
+              try { this.videoGenerator.stop && this.videoGenerator.stop(); } catch (e) { }
+              this.videoGenerator = null;
+            }
+          } catch (e) {
+            console.warn("Error cleaning video writer/generator:", e);
+          }
+
+          // Clear video element
+          if (this.videoElement) {
+            this.videoElement.srcObject = null;
+          }
+
+          // Clear references
+          this.audioWorkletNode = null;
+          this.mediaStream = null;
+
+          this._status("Subscriber stopped");
+        } catch (error) {
+          this._status(`Error stopping subscriber: ${error.message}`, true);
+        }
+      }
+    }
+
+
+
+    async function renderNewSubscriber({
+      user_id,
+      stream_id,
+      room_id,
+      role,
+      currentUserId,
+      meetingContainer,
+      subscribers,
+      host = "stream-gate.bandia.vn",
+      onStatus,
+    }) {
+      if (user_id === currentUserId) return null;
+
+      const tile = document.createElement("div");
+      tile.className = "video-tile";
+      const displayRole = role === "owner" ? " (Host)" : "";
+
+      tile.innerHTML = `
+    <video autoplay muted playsinline></video>
+    <div class="user-label">${user_id}${displayRole}</div>
+    <div class="status">Connecting...</div>
+    <div class="subscriber-controls">
+        <button class="audio-btn" id="audioBtn-${stream_id}">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+            </svg>
+        </button>
+        <button class="pin-btn" id="pinBtn-${stream_id}">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z"/>
+            </svg>
+        </button>
+    </div>
+  `;
+      // meetingContainer.appendChild(tile);
+
+      const sidebarArea = document.querySelector('.sidebar-videos');
+      sidebarArea.appendChild(tile);
+
+      const videoElement = tile.querySelector("video");
+      const statusDiv = tile.querySelector(".status");
+      const audioBtn = tile.querySelector(`#audioBtn-${stream_id}`);
+
+      // State tracking for this subscriber
+      let isAudioEnabled = true;
+      let isDisplayEnabled = true;
+
+      const subscriber = new EnhancedSubscriber({
+        streamId: stream_id,
+        roomId: room_id,
+        host,
+        videoElement,
+        onStatus: (msg, isError) => {
+          if (onStatus) onStatus(msg, isError, user_id, stream_id);
+          showStatusDiv(statusDiv, msg, isError);
+        },
+        mediaWorkerUrl: "media-worker.js",
+        audioWorkletUrl: "audio-worklet1.js",
+        mstgPolyfillUrl: "MSTG_polyfill.js",
+      });
+
+      // Audio toggle handler
+      audioBtn.addEventListener("click", async (e) => {
+        e.stopPropagation(); // Prevent fullscreen toggle
+        try {
+          if (subscriber && subscriber.toggleAudio) {
+            await subscriber.toggleAudio();
+            isAudioEnabled = !isAudioEnabled;
+
+            // Update button appearance
+            audioBtn.classList.toggle("muted", !isAudioEnabled);
+            audioBtn.title = isAudioEnabled ? "Mute audio" : "Unmute audio";
+
+            // Update SVG for muted state
+            if (!isAudioEnabled) {
+              audioBtn.innerHTML = `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63z"/>
+              <path d="M19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71z"/>
+              <path d="M4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3z"/>
+              <path d="M12 4L9.91 6.09 12 8.18V4z"/>
+            </svg>
+          `;
+            } else {
+              audioBtn.innerHTML = `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+            </svg>
+          `;
+            }
+          }
+        } catch (error) {
+          console.error(`Failed to toggle audio for ${user_id}:`, error);
+        }
+      });
+
+      // Initialize button states and tooltips
+      audioBtn.title = "Mute audio";
+
+      const pinBtn = tile.querySelector(`#pinBtn-${stream_id || 'self'}`);
+      pinBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handlePinVideo(user_id || currentUserId, tile);
+      });
+
+      // add data attribute for pinning
+      tile.setAttribute('data-user-id', user_id || currentUserId);
+
+      try {
+        await subscriber.start();
+        subscribers.push(subscriber);
+      } catch (error) {
+        statusDiv.textContent = "Connection Failed";
+        statusDiv.style.background = "rgba(255,0,0,0.5)";
+      }
+
+      // Fullscreen click (modified to exclude button clicks)
+      // tile.addEventListener("click", (e) => {
+      //   // Check if click was on control buttons
+      //   if (e.target.closest('.subscriber-controls')) {
+      //     return; // Don't toggle fullscreen if clicking on controls
+      //   }
+
+      //   e.stopPropagation();
+      //   if (tile.classList.contains("fullscreen")) {
+      //     tile.classList.remove("fullscreen");
+      //     document.querySelectorAll(".video-tile").forEach((t) => {
+      //       if (t !== tile) t.style.display = "";
+      //     });
+      //   } else {
+      //     document
+      //       .querySelectorAll(".video-tile.fullscreen")
+      //       .forEach((t) => t.classList.remove("fullscreen"));
+      //     tile.classList.add("fullscreen");
+      //     document.querySelectorAll(".video-tile").forEach((t) => {
+      //       if (t !== tile) t.style.display = "none";
+      //     });
+      //     tile.style.display = "";
+      //   }
+      // });
+
+      return subscriber;
+    }
+
+    function removeSubscriber(user_id, stream_id) {
+      // find matching subscriber and tile
+      let idx = -1;
+      if (stream_id) {
+        idx = subscribers.findIndex((s) => s.streamId === stream_id);
+      } else if (user_id) {
+        idx = subscribers.findIndex((s) => {
+          // some subscribers may not have user_id attached; attempt to find by DOM tile
+          try {
+            const tile = document.querySelector(`.video-tile[data-user-id="${user_id}"]`);
+            if (!tile) return false;
+            const video = tile.querySelector("video");
+            return video && video.srcObject && s.videoElement === video;
+          } catch (e) {
+            return false;
+          }
+        });
+      }
+
+      if (idx === -1) {
+        // fallback: try match by tile DOM attribute and find subscriber by streamId stored on tile
+        let tile = null;
+        if (user_id) {
+          tile = document.querySelector(`.video-tile[data-user-id="${user_id}"]`);
+        } else if (stream_id) {
+          tile = document.querySelector(`.video-tile[data-stream-id="${stream_id}"]`);
+        }
+        if (tile) {
+          const sid = tile.getAttribute('data-stream-id');
+          if (sid) idx = subscribers.findIndex(s => s.streamId === sid);
+        }
+      }
+
+      if (idx === -1) {
+        console.warn("removeSubscriber: subscriber not found", { user_id, stream_id });
+        // still attempt to remove UI tile if present
+        if (user_id) {
+          const tile = document.querySelector(`.video-tile[data-user-id="${user_id}"]`);
+          if (tile && tile.parentNode) tile.parentNode.removeChild(tile);
+        }
+        return;
+      }
+
+      const subscriber = subscribers[idx];
+
+      try {
+        // call stop to cleanup worker, audio mixer, video writer
+        subscriber.stop();
+      } catch (e) {
+        console.warn("Error stopping subscriber during remove:", e);
+      }
+
+      // remove DOM tile
+      try {
+        // prefer to find tile by stream id or user id attribute
+        let tile =
+          document.querySelector(`.video-tile[data-stream-id="${subscriber.streamId}"]`) ||
+          document.querySelector(`.video-tile[data-user-id="${user_id}"]`);
+        if (tile && tile.parentNode) tile.parentNode.removeChild(tile);
+      } catch (e) {
+        console.warn("Error removing subscriber tile:", e);
+      }
+
+      // remove from subscribers array
+      subscribers.splice(idx, 1);
+      console.log("Subscriber removed:", { user_id, stream_id: subscriber.streamId });
+    }
+    // Meeting Setup Function
+    async function setupMeeting(roomId, roomData, membersList) {
+      // Clear existing meeting
+      meetingContainer.innerHTML = `
+  <div class="main-video-area"></div>
+  <div class="sidebar-videos"></div>
+`;
+      subscribers.forEach((sub) => sub.stop());
+      subscribers = [];
+      if (publisher) {
+        publisher.stop();
+        publisher = null;
+      }
+
+      // Update UI
+      welcomeMessage.style.display = "none";
+      meetingContainer.classList.add("active");
+      currentRoomInfo.classList.add("active");
+      currentRoomName.textContent = roomData.room_name;
+      membersCount.textContent = `${membersList.length} member(s)`;
+
+
+
+      console.log("Setting up meeting for room:", roomId);
+      console.log("Members list:", membersList);
+      console.log("My info:", { currentUserId, myStreamId });
+
+
+      const tile = document.createElement("div");
+      tile.className = "video-tile";
+
+      // Determine if this is the current user
+      const displayName = "You";
+
+      // <div class="user-label">${currentUserId}${displayName}</div>
+      tile.innerHTML = `
+      <video autoplay playsinline></video>
+      <div class="user-label">${displayName}</div>
+    <div class="status">Connecting...</div>
+    <div class="controls">
+        <button class="mic-btn" id="micBtn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+            </svg>
+        </button>
+        <button class="cam-btn" id="camBtn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
+            </svg>
+        </button>
+    </div>
+`;
+
+
+      tile.setAttribute('data-user-id', currentUserId);
+      handlePinVideo(currentUserId, tile); // Pin self video by default
+
+      const pinBtn = document.createElement('button');
+      pinBtn.className = 'pin-btn';
+      pinBtn.id = 'pinBtn-self';
+      pinBtn.innerHTML = `
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z"/>
+  </svg>
+`;
+
+      const subscriberControls = document.createElement('div');
+      subscriberControls.className = 'subscriber-controls';
+      subscriberControls.appendChild(pinBtn);
+      tile.appendChild(subscriberControls);
+
+      pinBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handlePinVideo(currentUserId, tile);
+      });
+
+      // Get video element and status div
+      const videoElement = tile.querySelector("video");
+      const statusDiv = tile.querySelector(".status");
+      const micBtn = tile.querySelector("#micBtn");
+      const camBtn = tile.querySelector("#camBtn");
+
+      // State tracking
+      let isMicEnabled = true;
+      let isCamEnabled = true;
+
+      // Button click handlers
+      micBtn.addEventListener("click", async () => {
+        try {
+          if (publisher) {
+            await publisher.toggleMic();
+            isMicEnabled = !isMicEnabled;
+
+            // Update button appearance
+            micBtn.classList.toggle("muted", !isMicEnabled);
+            micBtn.title = isMicEnabled ? "Mute microphone" : "Unmute microphone";
+
+            // Update SVG for muted state
+            if (!isMicEnabled) {
+              micBtn.innerHTML = `
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28z"/>
+                        <path d="M14.98 11.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99z"/>
+                        <path d="M4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c.57-.08 1.12-.23 1.64-.46l2.36 2.36L21 19.73 4.27 3z"/>
+                    </svg>
+                `;
+            } else {
+              micBtn.innerHTML = `
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                        <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                    </svg>
+                `;
+            }
+          }
+        } catch (error) {
+          console.error("Failed to toggle microphone:", error);
+        }
+      });
+
+      camBtn.addEventListener("click", async () => {
+        try {
+          if (publisher) {
+            await publisher.toggleCamera();
+            isCamEnabled = !isCamEnabled;
+
+            // Update button appearance
+            camBtn.classList.toggle("disabled", !isCamEnabled);
+            camBtn.title = isCamEnabled ? "Turn off camera" : "Turn on camera";
+
+            // Update SVG for disabled state
+            if (!isCamEnabled) {
+              camBtn.innerHTML = `
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M21 6.5l-4 4V7c0-.55-.45-1-1-1H9.82L21 17.18V6.5z"/>
+                        <path d="M3.27 2L2 3.27 4.73 6H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.21 0 .39-.08.54-.18L19.73 21 21 19.73 3.27 2z"/>
+                    </svg>
+                `;
+            } else {
+              camBtn.innerHTML = `
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
+                    </svg>
+                `;
+            }
+          }
+        } catch (error) {
+          console.error("Failed to toggle camera:", error);
+        }
+      });
+
+      // Initialize button states
+      micBtn.title = "Mute microphone";
+      camBtn.title = "Turn off camera";
+
+
+
+      //extract my stream_id
+
+      try {
+        publisher = new Publisher({
+          publishUrl: `${WEBTP_BASE_URL}/${roomId}/${myStreamId}`,
+          streamType: "camera",
+          videoElement: videoElement,
+          streamId: "camera_stream",
+          width: 1280,
+          height: 720,
+          framerate: 30,
+          bitrate: 1_500_000,
+          onStatusUpdate: (msg, isError) => {
+            showStatusDiv(statusDiv, msg, isError);
+          },
+          onServerEvent: async (event) => {
+            if (event.user_id === currentUserId) return; // skip self
+            if (event.event === "new_member_joined") {
+              await renderNewSubscriber({
+                user_id: event.user_id,
+                stream_id: event.stream_id,
+                room_id: currentRoomId,
+                role: event.role,
+                currentUserId,
+                meetingContainer,
+                subscribers,
+                host: HOST,
+                onStatus: (msg, isError, user_id, stream_id) => {
+                  // console.log(
+                  //   `Subscriber [${user_id}] status:`,
+                  //   msg,
+                  //   isError      
+                  // );
+                },
+              });
+            }
+            if (event.event === "member_left") {
+              removeSubscriber(event.user_id, event.stream_id);
+            }
+          },
+        });
+        await publisher.startPublishing();
+      } catch (error) {
+        console.error("Failed to start publisher:", error);
+        statusDiv.textContent = "Publish Failed";
+        statusDiv.style.background = "rgba(255,0,0,0.5)";
+      }
+      // Setup video tiles for all members
+      for (const member of membersList) {
+        if (member.user_id !== currentUserId) {
+          await renderNewSubscriber({
+            user_id: member.user_id,
+            stream_id: member.stream_id,
+            room_id: currentRoomId,
+            role: member.role,
+            currentUserId,
+            meetingContainer,
+            subscribers,
+            host: HOST,
+            onStatus: (msg, isError, user_id, stream_id) => {
+              // console.log(`Subscriber [${user_id}] status:`, msg, isError);
+            },
+          });
+        } // Skip self
+      }
+
+      // Setup global audio output (optional - for monitoring mixed audio)
+      if (
+        globalAudioMixer &&
+        membersList.some((m) => m.user_id !== currentUserId)
+      ) {
+        try {
+          const mixedAudioStream = globalAudioMixer.getOutputMediaStream();
+          if (mixedAudioStream) {
+            console.log("Mixed audio stream available:", mixedAudioStream);
+          }
+        } catch (error) {
+          console.error("Failed to get mixed audio stream:", error);
+        }
+      }
+
+      const defaultPinnedUser = getDefaultPinnedUser(roomData);
+      if (defaultPinnedUser === currentUserId) {
+        // already pinned self above
+        return;
+      }
+
+      if (defaultPinnedUser) {
+        const defaultTile = document.querySelector(`[data-user-id="${defaultPinnedUser}"]`);
+        if (defaultTile) {
+          handlePinVideo(defaultPinnedUser, defaultTile);
+        }
+      }
+
+    }
+
+    // UI Functions
+    function showError(message) {
+      console.error(message);
+      // You can implement a toast notification here
+      alert(`Error: ${message}`);
+    }
+
+    function showSuccess(message) {
+      console.log(message);
+      // You can implement a toast notification here
+    }
+
+    function renderRoomList(rooms) {
+      roomList.innerHTML = "";
+
+      if (rooms.length === 0) {
+        roomList.innerHTML = '<div class="loading">No rooms available</div>';
+        return;
+      }
+
+      rooms.forEach((room) => {
+        const roomElement = document.createElement("div");
+        roomElement.className = "room-item";
+        roomElement.innerHTML = `
+                    <div class="room-type">${room.room_type}</div>
+                    <div class="room-name">${room.room_name}</div>
+                    <div class="room-code">${room.room_code}</div>
+                `;
+
+        roomElement.addEventListener("click", () => handleRoomClick(room));
+        roomList.appendChild(roomElement);
+      });
+    }
+
+    function createVideoTile(member, isOwn = false) {
+      // This function is now integrated into setupMeeting
+      // Keeping for potential future use
+    }
+
+    function leaveMeeting() {
+      // Close all connections
+      subscribers.forEach((sub) => sub.stop());
+      subscribers = [];
+      if (publisher) {
+        publisher.stop();
+        publisher = null;
+      }
+
+      if (globalAudioMixer && subscribers.length === 0) {
+        globalAudioMixer.cleanup();
+        globalAudioMixer = null;
+      }
+
+      // Reset UI
+      meetingContainer.classList.remove("active");
+      meetingContainer.innerHTML = "";
+      currentRoomInfo.classList.remove("active");
+      welcomeMessage.style.display = "block";
+
+      // Clear stored state
+      currentRoom = null;
+      currentRoomId = null;
+      myStreamId = null;
+      myMembershipId = null;
+      members = [];
+
+      console.log("Left meeting, cleared all state and shared resources");
+    }
+
+    // Event Handlers
+    async function handleCreateRoom() {
+      if (!currentUserId) {
+        showError("Please login first");
+        return;
+      }
+
+      const roomName = roomNameInput.value.trim();
+      if (!roomName) {
+        showError("Please enter a room name");
+        return;
+      }
+
+      try {
+        createRoomBtn.textContent = "Creating...";
+        createRoomBtn.disabled = true;
+
+        const newRoom = await createRoom(roomName);
+        showSuccess(`Room created: ${newRoom.room_code}`);
+
+        // Automatically join the created room
+        const joinResponse = await joinRoom(newRoom.room_code);
+        console.log("Join response after create:", joinResponse);
+
+        // Store important info from join response
+        currentRoomId = joinResponse.room_id;
+        myStreamId = joinResponse.stream_id;
+        myMembershipId = joinResponse.id;
+
+        const roomDetails = await getRoomById(joinResponse.room_id);
+
+        // Transform members data and setup meeting
+        const membersList = roomDetails.members.map((member) => ({
+          user_id: member.user_id,
+          stream_id: member.stream_id,
+          role: member.role,
+          membership_id: member.id,
+        }));
+
+        currentRoom = roomDetails.room;
+        members = membersList;
+        await setupMeeting(currentRoomId, currentRoom, membersList);
+
+        // Clear input and refresh room list
+        roomNameInput.value = "";
+        await loadRooms();
+      } catch (error) {
+        showError("Failed to create room: " + error.message);
+      } finally {
+        createRoomBtn.textContent = "Create Room";
+        createRoomBtn.disabled = false;
+      }
+    }
+
+    async function handleJoinRoomByCode() {
+      if (!currentUserId) {
+        showError("Please login first");
+        return;
+      }
+
+      const roomCode = roomCodeInput.value.trim();
+      if (!roomCode) {
+        showError("Please enter a room code");
+        return;
+      }
+
+      // Validate room code format (basic validation)
+      const roomCodeRegex = /^[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$/;
+      if (!roomCodeRegex.test(roomCode)) {
+        showError(
+          "Please enter a valid room code format (e.g., 5f8k-vgnx-smsw)"
+        );
+        return;
+      }
+
+      try {
+        joinRoomBtn.textContent = "Joining...";
+        joinRoomBtn.disabled = true;
+
+        await handleJoinRoom(roomCode);
+
+        // Clear input after successful join
+        roomCodeInput.value = "";
+
+        // Refresh room list
+        await loadRooms();
+      } catch (error) {
+        showError("Failed to join room: " + error.message);
+      } finally {
+        joinRoomBtn.textContent = "Join Room";
+        joinRoomBtn.disabled = false;
+      }
+    }
+    async function handleRoomClick(room) {
+      if (currentRoomId && currentRoomId === room.id) {
+        console.log("Already in this room:", room.id);
+        return; // Already in this room
+      }
+
+      try {
+        await handleJoinRoom(room.room_code);
+      } catch (error) {
+        showError("Failed to join room: " + error.message);
+      }
+    }
+
+    async function handleJoinRoom(roomCode) {
+      try {
+        // Join the room
+        const joinResponse = await joinRoom(roomCode);
+        console.log("Join response:", joinResponse);
+
+        // Store important info from join response
+        currentRoomId = joinResponse.room_id;
+        myStreamId = joinResponse.stream_id;
+        myMembershipId = joinResponse.id;
+
+        console.log("Stored info:", {
+          currentRoomId,
+          myStreamId,
+          myMembershipId,
+          currentUserId,
+        });
+
+        // Get room details and members
+        const roomDetails = await getRoomById(joinResponse.room_id);
+        console.log("Room details:", roomDetails);
+
+        // Transform participants data to match the expected format
+        const membersList = roomDetails.participants.map((member) => ({
+          user_id: member.user_id,
+          stream_id: member.stream_id,
+          role: member.role,
+          membership_id: member.id,
+        }));
+
+        // Setup meeting with room ID, room data, and participants list
+        currentRoom = roomDetails.room;
+        members = membersList;
+        await setupMeeting(currentRoomId, currentRoom, membersList);
+
+        showSuccess(`Joined room: ${currentRoom.room_name}`);
+      } catch (error) {
+        console.error("Failed to join room:", error);
+        throw error;
+      }
+    }
+
+    async function loadRooms() {
+      if (!currentUserId) {
+        roomList.innerHTML =
+          '<div class="loading">Please login to view rooms</div>';
+        return;
+      }
+
+      try {
+        roomList.innerHTML = '<div class="loading">Loading rooms...</div>';
+        const response = await listRooms();
+        renderRoomList(response.data || []);
+      } catch (error) {
+        roomList.innerHTML = '<div class="error">Failed to load rooms</div>';
+        console.error("Failed to load rooms:", error);
+      }
+    }
+
+
+    function showStatusDiv(statusDiv, msg, isError) {
+      statusDiv.textContent = msg;
+      statusDiv.style.background = isError
+        ? "rgba(255,0,0,0.5)"
+        : "rgba(0,128,0,0.7)";
+      statusDiv.style.display = "block";
+      if (statusDiv._hideTimeout) clearTimeout(statusDiv._hideTimeout);
+      statusDiv._hideTimeout = setTimeout(() => {
+        statusDiv.style.display = "none";
+      }, 5000);
+    }
+
+    function handlePinVideo(videoId, tile) {
+      const mainArea = document.querySelector('.main-video-area');
+      const sidebarArea = document.querySelector('.sidebar-videos');
+
+      // Unpin current pinned video
+      if (pinnedVideoId) {
+        const currentPinned = document.querySelector('.video-tile.pinned');
+        if (currentPinned) {
+          currentPinned.classList.remove('pinned');
+          sidebarArea.appendChild(currentPinned);
+        }
+      }
+
+      // Pin new video
+      if (videoId !== pinnedVideoId) {
+        tile.classList.add('pinned');
+        mainArea.appendChild(tile);
+        pinnedVideoId = videoId;
+      } else {
+        pinnedVideoId = null;
+      }
+    }
+
+    // Get global pinned user (e.g., room owner)
+    function getDefaultPinnedUser(roomData) {
+      console.warn("Room data for default pin:", roomData);
+      return roomData.user_id;
+    }
+
+    // Initialize
+    async function init() {
+      // Check if user is already logged in
+      const savedEmail = getSavedUserEmail();
+      console.log("Saved email from storage:", savedEmail);
+      if (savedEmail) {
+        currentUserId = savedEmail;
+        updateUserUI();
+        await loadRooms();
+      } else {
+        updateUserUI(); // This will show login overlay
+      }
+
+      // Setup event listeners
+      loginBtn.addEventListener("click", handleLogin);
+      logoutBtn.addEventListener("click", handleLogout);
+      createRoomBtn.addEventListener("click", handleCreateRoom);
+      joinRoomBtn.addEventListener("click", handleJoinRoomByCode);
+      leaveRoomBtn.addEventListener("click", leaveMeeting);
+
+      // Handle Enter key in email input
+      emailInput.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+          handleLogin();
+        }
+      });
+
+      // Handle Enter key in room name input
+      roomNameInput.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+          handleCreateRoom();
+        }
+      });
+
+      // Handle Enter key in room code input
+      roomCodeInput.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+          handleJoinRoomByCode();
+        }
+      });
+
+      // Handle ESC key for fullscreen
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          document
+            .querySelectorAll(".video-tile.fullscreen")
+            .forEach((tile) => {
+              tile.classList.remove("fullscreen");
+              document.querySelectorAll(".video-tile").forEach((t) => {
+                t.style.display = "";
+              });
+            });
+        }
+      });
+    }
+
+    // Start the application
+    init().catch(console.error);
+  </script>
+</body>
+
+</html>
