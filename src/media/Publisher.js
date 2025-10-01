@@ -258,13 +258,6 @@ export default class Publisher {
     }
 
     this.videoElement.srcObject = videoOnlyStream;
-    console.warn(
-      "added media stream to video element",
-      videoOnlyStream,
-      videoOnlyStream.getTracks(),
-      "video element: ",
-      this.videoElement
-    );
 
     // this.videoElement.srcObject = this.stream;
     this.onStatusUpdate(`${this.streamType} stream obtained`);
@@ -301,17 +294,17 @@ export default class Publisher {
           }
           if (value) {
             const msg = new TextDecoder().decode(value);
-            console.log("📩 Message from server:", msg);
             if (msg === "pong") {
               continue; // Ignore pong responses
             }
             let msgJson;
             try {
               msgJson = JSON.parse(msg);
+              console.log("📩 Message from server:", msgJson);
             } catch (e) {
               msgJson = null;
             }
-            if (msgJson && msgJson.event) {
+            if (msgJson) {
               console.log("Emitting server event:", msgJson);
               this.onServerEvent(msgJson);
             }
@@ -384,7 +377,7 @@ export default class Publisher {
             frame.close();
           } else {
             frameCounter++;
-            const keyFrame = frameCounter % 120 === 0; // Key frame every ~4 seconds
+            const keyFrame = frameCounter % 30 === 0; // Key frame every ~1 seconds
             this.videoEncoder.encode(frame, { keyFrame });
             frame.close();
           }
@@ -428,7 +421,6 @@ export default class Publisher {
   handleVideoChunk(chunk, metadata) {
     if (metadata && metadata.decoderConfig && !this.videoMetadataReady) {
       this.videoDescription = metadata.decoderConfig.description;
-      console.warn("video config", metadata.decoderConfig);
       this.videoConfig = {
         codec: metadata.decoderConfig.codec,
         codedWidth: metadata.decoderConfig.codedWidth,

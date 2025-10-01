@@ -82,6 +82,7 @@ class AudioMixer {
     isOwnAudio = false,
     channelWorkletPort
   ) {
+    console.warn(`Adding subscriber ${subscriberId} to audio mixer`);
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -368,6 +369,7 @@ class AudioMixer {
    * Load audio worklet module
    */
   async _loadAudioWorklet(audioWorkletUrl) {
+    console.warn("Loading audio worklet from:", audioWorkletUrl);
     try {
       await this.audioContext.audioWorklet.addModule(audioWorkletUrl);
       this._debug("Audio worklet loaded:", audioWorkletUrl);

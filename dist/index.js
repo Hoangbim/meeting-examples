@@ -309,7 +309,7 @@ class Participant extends EventEmitter$1 {
    */
   _getLocalTileHTML() {
     return `
-      <video autoplay playsinline></video>
+      <video autoplay playsinline style="transform: scaleX(-1);"></video>
       <div class="user-label">${this.getDisplayName()}</div>
       <div class="status">Connecting...</div>
       <div class="controls">
@@ -338,7 +338,7 @@ class Participant extends EventEmitter$1 {
    */
   _getRemoteTileHTML() {
     return `
-      <video autoplay muted playsinline></video>
+      <video autoplay muted playsinline style="transform: scaleX(-1);"></video>
       <div class="user-label">${this.getDisplayName()}</div>
       <div class="status">Connecting...</div>
       <div class="subscriber-controls">
@@ -893,7 +893,6 @@ class Publisher {
       videoOnlyStream.addTrack(videoTracks[0]);
     }
     this.videoElement.srcObject = videoOnlyStream;
-    console.warn("added media stream to video element", videoOnlyStream, videoOnlyStream.getTracks(), "video element: ", this.videoElement);
 
     // this.videoElement.srcObject = this.stream;
     this.onStatusUpdate(`${this.streamType} stream obtained`);
@@ -928,17 +927,17 @@ class Publisher {
           }
           if (value) {
             const msg = new TextDecoder().decode(value);
-            console.log("📩 Message from server:", msg);
             if (msg === "pong") {
               continue; // Ignore pong responses
             }
             let msgJson;
             try {
               msgJson = JSON.parse(msg);
+              console.log("📩 Message from server:", msgJson);
             } catch (e) {
               msgJson = null;
             }
-            if (msgJson && msgJson.event) {
+            if (msgJson) {
               console.log("Emitting server event:", msgJson);
               this.onServerEvent(msgJson);
             }
@@ -1000,7 +999,7 @@ class Publisher {
             frame.close();
           } else {
             frameCounter++;
-            const keyFrame = frameCounter % 120 === 0; // Key frame every ~4 seconds
+            const keyFrame = frameCounter % 30 === 0; // Key frame every ~1 seconds
             this.videoEncoder.encode(frame, {
               keyFrame
             });
@@ -1036,7 +1035,6 @@ class Publisher {
   handleVideoChunk(chunk, metadata) {
     if (metadata && metadata.decoderConfig && !this.videoMetadataReady) {
       this.videoDescription = metadata.decoderConfig.description;
-      console.warn("video config", metadata.decoderConfig);
       this.videoConfig = {
         codec: metadata.decoderConfig.codec,
         codedWidth: metadata.decoderConfig.codedWidth,
@@ -1267,9 +1265,9 @@ class Subscriber extends EventEmitter$1 {
     this.isOwnStream = config.isOwnStream || false;
 
     // Media configuration
-    this.mediaWorkerUrl = config.mediaWorkerUrl || "media-worker.js";
-    this.audioWorkletUrl = config.audioWorkletUrl || "audio-worklet1.js";
-    this.mstgPolyfillUrl = config.mstgPolyfillUrl || "MSTG_polyfill.js";
+    this.mediaWorkerUrl = config.mediaWorkerUrl || "workers/media-worker.js";
+    this.audioWorkletUrl = config.audioWorkletUrl || "workers/audio-worklet1.js";
+    this.mstgPolyfillUrl = config.mstgPolyfillUrl || "polyfills/MSTG_polyfill.js";
 
     // State
     this.isStarted = false;
@@ -1298,6 +1296,7 @@ class Subscriber extends EventEmitter$1 {
       throw new Error("Subscriber already started");
     }
     try {
+      console.log("Starting subscriber:", this.subscriberId);
       this.emit("starting", {
         subscriber: this
       });
@@ -1451,6 +1450,7 @@ class Subscriber extends EventEmitter$1 {
         });
       };
       const mediaUrl = `wss://${this.host}/meeting/${this.roomId}/${this.streamId}`;
+      console.log("try to init worker with url:", mediaUrl);
       this.worker.postMessage({
         type: "init",
         data: {
@@ -1479,6 +1479,7 @@ class Subscriber extends EventEmitter$1 {
 
       // Audio mixer should be set externally before starting
       if (this.audioMixer) {
+        console.warn("Adding subscriber to audio mixer in new subscriber:", this.subscriberId);
         this.audioWorkletNode = await this.audioMixer.addSubscriber(this.subscriberId, this.audioWorkletUrl, this.isOwnStream, channelPort);
         if (this.audioWorkletNode) {
           this.audioWorkletNode.port.onmessage = event => {
@@ -1739,6 +1740,7 @@ class AudioMixer {
    * Add a subscriber's audio stream to the mixer
    */
   async addSubscriber(subscriberId, audioWorkletUrl, isOwnAudio = false, channelWorkletPort) {
+    console.warn(`Adding subscriber ${subscriberId} to audio mixer`);
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -1999,6 +2001,7 @@ class AudioMixer {
    * Load audio worklet module
    */
   async _loadAudioWorklet(audioWorkletUrl) {
+    console.warn("Loading audio worklet from:", audioWorkletUrl);
     try {
       await this.audioContext.audioWorklet.addModule(audioWorkletUrl);
       this._debug("Audio worklet loaded:", audioWorkletUrl);
@@ -2150,6 +2153,7 @@ class Room extends EventEmitter$1 {
       const joinResponse = await this.apiClient.joinRoom(this.code);
 
       // Store connection info
+      this.id = joinResponse.room_id;
       this.membershipId = joinResponse.id;
       this.streamId = joinResponse.stream_id;
 
@@ -2162,6 +2166,9 @@ class Room extends EventEmitter$1 {
 
       // Setup participants
       await this._setupParticipants(roomDetails.participants, userId);
+      if (this.mainVideoArea && this.sidebarArea) {
+        this.renderParticipantTiles();
+      }
 
       // Setup media connections
       await this._setupMediaConnections();
@@ -2439,18 +2446,38 @@ class Room extends EventEmitter$1 {
   /**
    * Pin a participant's video
    */
+  // pinParticipant(userId) {
+  //   const participant = this.participants.get(userId);
+  //   if (!participant) return false;
+
+  //   // Unpin current participant
+  //   if (this.pinnedParticipant) {
+  //     this.pinnedParticipant.isPinned = false;
+  //   }
+
+  //   // Pin new participant
+  //   participant.isPinned = true;
+  //   this.pinnedParticipant = participant;
+
+  //   this.emit("participantPinned", { room: this, participant });
+
+  //   return true;
+  // }
+
   pinParticipant(userId) {
     const participant = this.participants.get(userId);
     if (!participant) return false;
 
-    // Unpin current participant
-    if (this.pinnedParticipant) {
+    // Unpin current participant và move về sidebar
+    if (this.pinnedParticipant && this.pinnedParticipant !== participant) {
       this.pinnedParticipant.isPinned = false;
+      this._moveParticipantTile(this.pinnedParticipant);
     }
 
-    // Pin new participant
+    // Pin new participant và move lên main
     participant.isPinned = true;
     this.pinnedParticipant = participant;
+    this._moveParticipantTile(participant);
     this.emit("participantPinned", {
       room: this,
       participant
@@ -2461,11 +2488,34 @@ class Room extends EventEmitter$1 {
   /**
    * Unpin currently pinned participant
    */
+  // unpinParticipant() {
+  //   if (!this.pinnedParticipant) return false;
+
+  //   this.pinnedParticipant.isPinned = false;
+  //   const unpinnedParticipant = this.pinnedParticipant;
+  //   this.pinnedParticipant = null;
+
+  //   this.emit("participantUnpinned", {
+  //     room: this,
+  //     participant: unpinnedParticipant,
+  //   });
+
+  //   return true;
+  // }
+
   unpinParticipant() {
     if (!this.pinnedParticipant) return false;
     this.pinnedParticipant.isPinned = false;
     const unpinnedParticipant = this.pinnedParticipant;
+
+    // Move về sidebar
+    this._moveParticipantTile(unpinnedParticipant);
     this.pinnedParticipant = null;
+
+    // Auto-pin local participant nếu có
+    if (this.localParticipant) {
+      this.pinParticipant(this.localParticipant.userId);
+    }
     this.emit("participantUnpinned", {
       room: this,
       participant: unpinnedParticipant
@@ -2484,6 +2534,7 @@ class Room extends EventEmitter$1 {
   /**
    * Render participant video tiles
    */
+
   renderParticipantTiles() {
     if (!this.mainVideoArea || !this.sidebarArea) {
       throw new Error("UI containers not set");
@@ -2492,10 +2543,15 @@ class Room extends EventEmitter$1 {
     // Clear existing tiles
     this.mainVideoArea.innerHTML = "";
     this.sidebarArea.innerHTML = "";
+    console.warn("Rendering participant tiles..., participants:", this.participants);
 
     // Render each participant's tile
     for (const participant of this.participants.values()) {
-      const tile = participant.createVideoTile();
+      // Tạo tile nếu chưa có
+      let tile = participant.tile;
+      if (!tile) {
+        tile = participant.createVideoTile();
+      }
       if (participant.isPinned) {
         this.mainVideoArea.appendChild(tile);
       } else {
@@ -2507,7 +2563,7 @@ class Room extends EventEmitter$1 {
     if (!this.pinnedParticipant && this.localParticipant) {
       this.pinParticipant(this.localParticipant.userId);
       const localTile = this.localParticipant.tile;
-      if (localTile) {
+      if (localTile && !this.mainVideoArea.contains(localTile)) {
         this.mainVideoArea.appendChild(localTile);
       }
     }
@@ -2584,6 +2640,7 @@ class Room extends EventEmitter$1 {
       throw new Error("Video element not found for local participant");
     }
     const publishUrl = `${this.mediaConfig.webtpUrl}/${this.id}/${this.streamId}`;
+    console.log("trying to connect webtransport to", publishUrl);
     const publisher = new Publisher({
       publishUrl,
       streamType: "camera",
@@ -2619,40 +2676,106 @@ class Room extends EventEmitter$1 {
       audioWorkletUrl: "workers/audio-worklet1.js",
       mstgPolyfillUrl: "polyfills/MSTG_polyfill.js"
     });
-    await subscriber.start();
-    participant.setSubscriber(subscriber);
-
     // Add to audio mixer
     if (this.audioMixer) {
-      await this.audioMixer.addSubscriber(`${participant.userId}_${participant.streamId}`, "workers/audio-worklet1.js", false, null // channelPort will be handled by subscriber
-      );
+      subscriber.setAudioMixer(this.audioMixer);
     }
+    await subscriber.start();
+    participant.setSubscriber(subscriber);
   }
 
   /**
    * Handle server events from publisher
    */
   async _handleServerEvent(event) {
-    if (event.event === "new_participant_joined") {
-      if (event.user_id === this.localParticipant?.userId) return;
+    console.log("Received server event:", event);
+    // if (event.type === "join") {
+    //   const joinedParticipant = event.participant;
+    //   if (joinedParticipant.user_id === this.localParticipant?.userId) return;
+
+    //   const participant = this.addParticipant(
+    //     {
+    //       user_id: joinedParticipant.user_id,
+    //       stream_id: joinedParticipant.stream_id,
+    //       id: joinedParticipant.membership_id,
+    //       role: joinedParticipant.role,
+    //     },
+    //     this.localParticipant?.userId
+    //   );
+
+    //   this.renderParticipantTiles();
+    //   await this._setupRemoteSubscriber(participant);
+    // }
+
+    // if (event.type === "leave") {
+    //   this.removeParticipant(event.participant.user_id);
+    //   this.renderParticipantTiles();
+    // }
+    if (event.type === "join") {
+      const joinedParticipant = event.participant;
+      if (joinedParticipant.user_id === this.localParticipant?.userId) return;
       const participant = this.addParticipant({
-        user_id: event.user_id,
-        stream_id: event.stream_id,
-        id: event.membership_id,
-        role: event.role
+        user_id: joinedParticipant.user_id,
+        stream_id: joinedParticipant.stream_id,
+        id: joinedParticipant.membership_id,
+        role: joinedParticipant.role
       }, this.localParticipant?.userId);
+
+      // Tạo tile và thêm vào UI ngay
+      const tile = participant.createVideoTile();
+      if (this.sidebarArea) {
+        this.sidebarArea.appendChild(tile);
+      }
+
+      // Setup subscriber sau khi đã có tile và videoElement
       await this._setupRemoteSubscriber(participant);
-      this.renderParticipantTiles();
     }
-    if (event.event === "participant_left") {
-      this.removeParticipant(event.user_id);
-      this.renderParticipantTiles();
+    if (event.type === "leave") {
+      const participant = this.participants.get(event.participant.user_id);
+      if (participant) {
+        // Remove tile khỏi DOM trước
+        if (participant.tile && participant.tile.parentNode) {
+          participant.tile.parentNode.removeChild(participant.tile);
+        }
+
+        // Sau đó cleanup participant
+        this.removeParticipant(event.participant.user_id);
+
+        // Nếu người bị remove là pinned participant, auto-pin local
+        if (!this.pinnedParticipant && this.localParticipant) {
+          this.pinParticipant(this.localParticipant.userId);
+          if (this.localParticipant.tile && this.mainVideoArea) {
+            this.mainVideoArea.innerHTML = "";
+            this.mainVideoArea.appendChild(this.localParticipant.tile);
+          }
+        }
+      }
     }
   }
 
   /**
    * Setup event listeners for a participant
    */
+  // _setupParticipantEvents(participant) {
+  //   participant.on("pinToggled", ({ participant: p, pinned }) => {
+  //     if (pinned) {
+  //       this.pinParticipant(p.userId);
+  //     } else if (this.pinnedParticipant === p) {
+  //       this.unpinParticipant();
+  //     }
+  //     this.renderParticipantTiles();
+  //   });
+
+  //   participant.on("error", ({ participant: p, error, action }) => {
+  //     this.emit("participantError", {
+  //       room: this,
+  //       participant: p,
+  //       error,
+  //       action,
+  //     });
+  //   });
+  // }
+
   _setupParticipantEvents(participant) {
     participant.on("pinToggled", ({
       participant: p,
@@ -2663,7 +2786,9 @@ class Room extends EventEmitter$1 {
       } else if (this.pinnedParticipant === p) {
         this.unpinParticipant();
       }
-      this.renderParticipantTiles();
+
+      // Chỉ di chuyển tile của participant này
+      this._moveParticipantTile(p);
     });
     participant.on("error", ({
       participant: p,
@@ -2677,6 +2802,22 @@ class Room extends EventEmitter$1 {
         action
       });
     });
+  }
+  _moveParticipantTile(participant) {
+    if (!participant.tile) return;
+
+    // Remove khỏi vị trí hiện tại
+    if (participant.tile.parentNode) {
+      participant.tile.parentNode.removeChild(participant.tile);
+    }
+
+    // Thêm vào vị trí mới
+    if (participant.isPinned && this.mainVideoArea) {
+      this.mainVideoArea.innerHTML = "";
+      this.mainVideoArea.appendChild(participant.tile);
+    } else if (!participant.isPinned && this.sidebarArea) {
+      this.sidebarArea.appendChild(participant.tile);
+    }
   }
 
   /**

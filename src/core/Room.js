@@ -59,6 +59,7 @@ class Room extends EventEmitter {
       const joinResponse = await this.apiClient.joinRoom(this.code);
 
       // Store connection info
+      this.id = joinResponse.room_id;
       this.membershipId = joinResponse.id;
       this.streamId = joinResponse.stream_id;
 
@@ -73,6 +74,10 @@ class Room extends EventEmitter {
 
       // Setup participants
       await this._setupParticipants(roomDetails.participants, userId);
+
+      if (this.mainVideoArea && this.sidebarArea) {
+        this.renderParticipantTiles();
+      }
 
       // Setup media connections
       await this._setupMediaConnections();
@@ -329,18 +334,38 @@ class Room extends EventEmitter {
   /**
    * Pin a participant's video
    */
+  // pinParticipant(userId) {
+  //   const participant = this.participants.get(userId);
+  //   if (!participant) return false;
+
+  //   // Unpin current participant
+  //   if (this.pinnedParticipant) {
+  //     this.pinnedParticipant.isPinned = false;
+  //   }
+
+  //   // Pin new participant
+  //   participant.isPinned = true;
+  //   this.pinnedParticipant = participant;
+
+  //   this.emit("participantPinned", { room: this, participant });
+
+  //   return true;
+  // }
+
   pinParticipant(userId) {
     const participant = this.participants.get(userId);
     if (!participant) return false;
 
-    // Unpin current participant
-    if (this.pinnedParticipant) {
+    // Unpin current participant và move về sidebar
+    if (this.pinnedParticipant && this.pinnedParticipant !== participant) {
       this.pinnedParticipant.isPinned = false;
+      this._moveParticipantTile(this.pinnedParticipant);
     }
 
-    // Pin new participant
+    // Pin new participant và move lên main
     participant.isPinned = true;
     this.pinnedParticipant = participant;
+    this._moveParticipantTile(participant);
 
     this.emit("participantPinned", { room: this, participant });
 
@@ -350,12 +375,36 @@ class Room extends EventEmitter {
   /**
    * Unpin currently pinned participant
    */
+  // unpinParticipant() {
+  //   if (!this.pinnedParticipant) return false;
+
+  //   this.pinnedParticipant.isPinned = false;
+  //   const unpinnedParticipant = this.pinnedParticipant;
+  //   this.pinnedParticipant = null;
+
+  //   this.emit("participantUnpinned", {
+  //     room: this,
+  //     participant: unpinnedParticipant,
+  //   });
+
+  //   return true;
+  // }
+
   unpinParticipant() {
     if (!this.pinnedParticipant) return false;
 
     this.pinnedParticipant.isPinned = false;
     const unpinnedParticipant = this.pinnedParticipant;
+
+    // Move về sidebar
+    this._moveParticipantTile(unpinnedParticipant);
+
     this.pinnedParticipant = null;
+
+    // Auto-pin local participant nếu có
+    if (this.localParticipant) {
+      this.pinParticipant(this.localParticipant.userId);
+    }
 
     this.emit("participantUnpinned", {
       room: this,
@@ -376,6 +425,7 @@ class Room extends EventEmitter {
   /**
    * Render participant video tiles
    */
+
   renderParticipantTiles() {
     if (!this.mainVideoArea || !this.sidebarArea) {
       throw new Error("UI containers not set");
@@ -385,9 +435,18 @@ class Room extends EventEmitter {
     this.mainVideoArea.innerHTML = "";
     this.sidebarArea.innerHTML = "";
 
+    console.warn(
+      "Rendering participant tiles..., participants:",
+      this.participants
+    );
+
     // Render each participant's tile
     for (const participant of this.participants.values()) {
-      const tile = participant.createVideoTile();
+      // Tạo tile nếu chưa có
+      let tile = participant.tile;
+      if (!tile) {
+        tile = participant.createVideoTile();
+      }
 
       if (participant.isPinned) {
         this.mainVideoArea.appendChild(tile);
@@ -400,7 +459,7 @@ class Room extends EventEmitter {
     if (!this.pinnedParticipant && this.localParticipant) {
       this.pinParticipant(this.localParticipant.userId);
       const localTile = this.localParticipant.tile;
-      if (localTile) {
+      if (localTile && !this.mainVideoArea.contains(localTile)) {
         this.mainVideoArea.appendChild(localTile);
       }
     }
@@ -479,6 +538,7 @@ class Room extends EventEmitter {
     }
 
     const publishUrl = `${this.mediaConfig.webtpUrl}/${this.id}/${this.streamId}`;
+    console.log("trying to connect webtransport to", publishUrl);
 
     const publisher = new Publisher({
       publishUrl,
@@ -518,51 +578,112 @@ class Room extends EventEmitter {
       audioWorkletUrl: "workers/audio-worklet1.js",
       mstgPolyfillUrl: "polyfills/MSTG_polyfill.js",
     });
+    // Add to audio mixer
+    if (this.audioMixer) {
+      subscriber.setAudioMixer(this.audioMixer);
+    }
 
     await subscriber.start();
     participant.setSubscriber(subscriber);
-
-    // Add to audio mixer
-    if (this.audioMixer) {
-      await this.audioMixer.addSubscriber(
-        `${participant.userId}_${participant.streamId}`,
-        "workers/audio-worklet1.js",
-        false,
-        null // channelPort will be handled by subscriber
-      );
-    }
   }
 
   /**
    * Handle server events from publisher
    */
   async _handleServerEvent(event) {
-    if (event.event === "new_participant_joined") {
-      if (event.user_id === this.localParticipant?.userId) return;
+    console.log("Received server event:", event);
+    // if (event.type === "join") {
+    //   const joinedParticipant = event.participant;
+    //   if (joinedParticipant.user_id === this.localParticipant?.userId) return;
+
+    //   const participant = this.addParticipant(
+    //     {
+    //       user_id: joinedParticipant.user_id,
+    //       stream_id: joinedParticipant.stream_id,
+    //       id: joinedParticipant.membership_id,
+    //       role: joinedParticipant.role,
+    //     },
+    //     this.localParticipant?.userId
+    //   );
+
+    //   this.renderParticipantTiles();
+    //   await this._setupRemoteSubscriber(participant);
+    // }
+
+    // if (event.type === "leave") {
+    //   this.removeParticipant(event.participant.user_id);
+    //   this.renderParticipantTiles();
+    // }
+    if (event.type === "join") {
+      const joinedParticipant = event.participant;
+      if (joinedParticipant.user_id === this.localParticipant?.userId) return;
 
       const participant = this.addParticipant(
         {
-          user_id: event.user_id,
-          stream_id: event.stream_id,
-          id: event.membership_id,
-          role: event.role,
+          user_id: joinedParticipant.user_id,
+          stream_id: joinedParticipant.stream_id,
+          id: joinedParticipant.membership_id,
+          role: joinedParticipant.role,
         },
         this.localParticipant?.userId
       );
 
+      // Tạo tile và thêm vào UI ngay
+      const tile = participant.createVideoTile();
+      if (this.sidebarArea) {
+        this.sidebarArea.appendChild(tile);
+      }
+
+      // Setup subscriber sau khi đã có tile và videoElement
       await this._setupRemoteSubscriber(participant);
-      this.renderParticipantTiles();
     }
 
-    if (event.event === "participant_left") {
-      this.removeParticipant(event.user_id);
-      this.renderParticipantTiles();
+    if (event.type === "leave") {
+      const participant = this.participants.get(event.participant.user_id);
+      if (participant) {
+        // Remove tile khỏi DOM trước
+        if (participant.tile && participant.tile.parentNode) {
+          participant.tile.parentNode.removeChild(participant.tile);
+        }
+
+        // Sau đó cleanup participant
+        this.removeParticipant(event.participant.user_id);
+
+        // Nếu người bị remove là pinned participant, auto-pin local
+        if (!this.pinnedParticipant && this.localParticipant) {
+          this.pinParticipant(this.localParticipant.userId);
+          if (this.localParticipant.tile && this.mainVideoArea) {
+            this.mainVideoArea.innerHTML = "";
+            this.mainVideoArea.appendChild(this.localParticipant.tile);
+          }
+        }
+      }
     }
   }
 
   /**
    * Setup event listeners for a participant
    */
+  // _setupParticipantEvents(participant) {
+  //   participant.on("pinToggled", ({ participant: p, pinned }) => {
+  //     if (pinned) {
+  //       this.pinParticipant(p.userId);
+  //     } else if (this.pinnedParticipant === p) {
+  //       this.unpinParticipant();
+  //     }
+  //     this.renderParticipantTiles();
+  //   });
+
+  //   participant.on("error", ({ participant: p, error, action }) => {
+  //     this.emit("participantError", {
+  //       room: this,
+  //       participant: p,
+  //       error,
+  //       action,
+  //     });
+  //   });
+  // }
+
   _setupParticipantEvents(participant) {
     participant.on("pinToggled", ({ participant: p, pinned }) => {
       if (pinned) {
@@ -570,7 +691,9 @@ class Room extends EventEmitter {
       } else if (this.pinnedParticipant === p) {
         this.unpinParticipant();
       }
-      this.renderParticipantTiles();
+
+      // Chỉ di chuyển tile của participant này
+      this._moveParticipantTile(p);
     });
 
     participant.on("error", ({ participant: p, error, action }) => {
@@ -581,6 +704,23 @@ class Room extends EventEmitter {
         action,
       });
     });
+  }
+
+  _moveParticipantTile(participant) {
+    if (!participant.tile) return;
+
+    // Remove khỏi vị trí hiện tại
+    if (participant.tile.parentNode) {
+      participant.tile.parentNode.removeChild(participant.tile);
+    }
+
+    // Thêm vào vị trí mới
+    if (participant.isPinned && this.mainVideoArea) {
+      this.mainVideoArea.innerHTML = "";
+      this.mainVideoArea.appendChild(participant.tile);
+    } else if (!participant.isPinned && this.sidebarArea) {
+      this.sidebarArea.appendChild(participant.tile);
+    }
   }
 
   /**

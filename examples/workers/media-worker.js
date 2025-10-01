@@ -279,7 +279,6 @@ function setupWebSocket() {
 function handleMediaWsMessage(event) {
   if (typeof event.data === "string") {
     const dataJson = JSON.parse(event.data);
-    console.warn("[Media worker]: Received config data:", dataJson);
     if (dataJson.type === "TotalViewerCount") {
       console.log(
         "[Media worker]: TotalViewerCount received from websocket:",
@@ -303,17 +302,10 @@ function handleMediaWsMessage(event) {
       const vConfigRecv = videoConfig.description;
       videoConfig.description = base64ToUint8Array(videoConfig.description);
 
-      console.warn(
-        "videoconfig base64 received:",
-        vConfigRecv,
-        "Video config description after decoding to uint8array:",
-        videoConfig.description
-      );
       const audioConfigDescription = base64ToUint8Array(
         audioConfig.description
       );
       videoDecoder.configure(videoConfig);
-      console.log("Video decoder configured:", videoConfig);
       audioDecoder.configure(audioConfig);
 
       // decode first audio frame to trigger audio decoder
@@ -382,18 +374,6 @@ function handleMediaWsMessage(event) {
         data,
       });
       audioDecoder.decode(chunk);
-      // audioFrameBuffer.push(chunk);
-      // if (audioFrameBuffer.length === 23 && !audioPlaybackStarted) {
-      //   audioPlaybackStarted = true;
-      //   curAudioInterval = {
-      //     speed: 0,
-      //     rate: 1000 / audioFrameRate,
-      //   };
-      //   startSendingAudio(curAudioInterval);
-      // }
-      // if (audioFrameBuffer.length >= 46) {
-      //   audioFrameBuffer.shift();
-      // }
       return;
     } else if (type === "key" || type === "delta") {
       // Video
@@ -401,30 +381,7 @@ function handleMediaWsMessage(event) {
       if (keyFrameReceived) {
         if (videoDecoder.state === "closed") {
           videoDecoder = new VideoDecoder(videoInit);
-          // videoDecoder.configure(videoConfig);
-          const videoDecoderConfig = {
-            codec: "avc1.640c34",
-            // codec: "avc1.42E01E",
-            // codec: "hev1.1.0.L90.b0",
-            width: 1280,
-            height: 720,
-            framerate: 60,
-            bitrate: 1_500_000,
-            latencyMode: "quality",
-            hardwareAcceleration: "prefer-hardware",
-            // description: videoConfig.description,
-            // description: [123],
-
-            // hevc: {
-            //   format: "annexb",
-            //   maxBFrames: 0,
-            // },
-          };
-          console.log(
-            "Video decoder was closed. Re-initialized. with config:",
-            videoDecoderConfig
-          );
-          videoDecoder.configure(videoDecoderConfig);
+          videoDecoder.configure(videoConfig);
         }
         const encodedChunk = new EncodedVideoChunk({
           timestamp: timestamp * 1000,
@@ -434,17 +391,7 @@ function handleMediaWsMessage(event) {
         });
         // videoFrameBuffer.push(encodedChunk);
         videoDecoder.decode(encodedChunk);
-        // if (videoFrameBuffer.length === 30 && !videoPlaybackStarted) {
-        //   videoPlaybackStarted = true;
-        //   curVideoInterval = {
-        //     speed: 0,
-        //     rate: 1000 / videoFrameRate,
-        //   };
-        //   startSendingVideo(curVideoInterval);
-        // }
-        // if (videoFrameBuffer.length >= 60) {
-        //   videoFrameBuffer.shift();
-        // }
+
         return;
       }
     } else if (type === "config") {

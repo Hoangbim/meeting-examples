@@ -16,9 +16,11 @@ class Subscriber extends EventEmitter {
     this.isOwnStream = config.isOwnStream || false;
 
     // Media configuration
-    this.mediaWorkerUrl = config.mediaWorkerUrl || "media-worker.js";
-    this.audioWorkletUrl = config.audioWorkletUrl || "audio-worklet1.js";
-    this.mstgPolyfillUrl = config.mstgPolyfillUrl || "MSTG_polyfill.js";
+    this.mediaWorkerUrl = config.mediaWorkerUrl || "workers/media-worker.js";
+    this.audioWorkletUrl =
+      config.audioWorkletUrl || "workers/audio-worklet1.js";
+    this.mstgPolyfillUrl =
+      config.mstgPolyfillUrl || "polyfills/MSTG_polyfill.js";
 
     // State
     this.isStarted = false;
@@ -48,6 +50,7 @@ class Subscriber extends EventEmitter {
     }
 
     try {
+      console.log("Starting subscriber:", this.subscriberId);
       this.emit("starting", { subscriber: this });
       this._updateConnectionStatus("connecting");
 
@@ -189,6 +192,7 @@ class Subscriber extends EventEmitter {
       };
 
       const mediaUrl = `wss://${this.host}/meeting/${this.roomId}/${this.streamId}`;
+      console.log("try to init worker with url:", mediaUrl);
 
       this.worker.postMessage(
         {
@@ -219,6 +223,10 @@ class Subscriber extends EventEmitter {
 
       // Audio mixer should be set externally before starting
       if (this.audioMixer) {
+        console.warn(
+          "Adding subscriber to audio mixer in new subscriber:",
+          this.subscriberId
+        );
         this.audioWorkletNode = await this.audioMixer.addSubscriber(
           this.subscriberId,
           this.audioWorkletUrl,

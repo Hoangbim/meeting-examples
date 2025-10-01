@@ -66,7 +66,7 @@ class Participant extends EventEmitter {
    */
   _getLocalTileHTML() {
     return `
-      <video autoplay playsinline></video>
+      <video autoplay playsinline style="transform: scaleX(-1);"></video>
       <div class="user-label">${this.getDisplayName()}</div>
       <div class="status">Connecting...</div>
       <div class="controls">
@@ -95,7 +95,7 @@ class Participant extends EventEmitter {
    */
   _getRemoteTileHTML() {
     return `
-      <video autoplay muted playsinline></video>
+      <video autoplay muted playsinline style="transform: scaleX(-1);"></video>
       <div class="user-label">${this.getDisplayName()}</div>
       <div class="status">Connecting...</div>
       <div class="subscriber-controls">
