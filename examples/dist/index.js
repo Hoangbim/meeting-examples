@@ -470,6 +470,15 @@ class Participant extends EventEmitter$1 {
    * Toggle pin status
    */
   togglePin() {
+    if (!this.isLocal) {
+      if (this.isPinned) {
+        this.subscriber?.switchBitrate("360p");
+        console.warn("Unpin participant, switch to low quality");
+      } else {
+        this.subscriber?.switchBitrate("720p");
+        console.warn("Pin participant, switch to high quality");
+      }
+    }
     this.isPinned = !this.isPinned;
     this.emit("pinToggled", {
       participant: this,
@@ -969,10 +978,25 @@ class Publisher {
     // Setup reader cho event stream
     this.setupEventStreamReader(reader);
     await this.sendPublisherState();
-    setInterval(() => {
+    const workerInterval = new Worker("polyfills/intervalWorker.js");
+    workerInterval.postMessage({
+      interval: 500
+    });
+    let lastPingTime = Date.now();
+    workerInterval.onmessage = e => {
       const ping = new TextEncoder().encode("ping");
       this.sendOverEventStream(ping);
-    }, 500);
+      if (Date.now() - lastPingTime > 700) {
+        console.warn("Ping delay detected, connection may be unstable");
+      }
+      lastPingTime = Date.now();
+    };
+
+    // setInterval(() => {
+    //   const ping = new TextEncoder().encode("ping");
+    //   this.sendOverEventStream(ping);
+    //   console.log("Ping sent to server");
+    // }, 500);
   }
   setupEventStreamReader(reader) {
     (async () => {
@@ -1079,13 +1103,6 @@ class Publisher {
         console.error(`Error reading from stream ${channelName}:`, err);
       }
     })();
-    setInterval(() => {
-      const streamData = this.publishStreams.get(channelName);
-      if (streamData && this.isChannelOpen) {
-        const ping = new TextEncoder().encode("ping");
-        this.sendOverStream(channelName, ping).catch(() => {});
-      }
-    }, 500);
   }
   async sendOverStream(channelName, frameBytes) {
     const streamData = this.publishStreams.get(channelName);
@@ -2645,23 +2662,6 @@ class Room extends EventEmitter$1 {
   /**
    * Pin a participant's video
    */
-  // pinParticipant(userId) {
-  //   const participant = this.participants.get(userId);
-  //   if (!participant) return false;
-
-  //   // Unpin current participant
-  //   if (this.pinnedParticipant) {
-  //     this.pinnedParticipant.isPinned = false;
-  //   }
-
-  //   // Pin new participant
-  //   participant.isPinned = true;
-  //   this.pinnedParticipant = participant;
-
-  //   this.emit("participantPinned", { room: this, participant });
-
-  //   return true;
-  // }
 
   pinParticipant(userId) {
     const participant = this.participants.get(userId);
@@ -2955,25 +2955,6 @@ class Room extends EventEmitter$1 {
   /**
    * Setup event listeners for a participant
    */
-  // _setupParticipantEvents(participant) {
-  //   participant.on("pinToggled", ({ participant: p, pinned }) => {
-  //     if (pinned) {
-  //       this.pinParticipant(p.userId);
-  //     } else if (this.pinnedParticipant === p) {
-  //       this.unpinParticipant();
-  //     }
-  //     this.renderParticipantTiles();
-  //   });
-
-  //   participant.on("error", ({ participant: p, error, action }) => {
-  //     this.emit("participantError", {
-  //       room: this,
-  //       participant: p,
-  //       error,
-  //       action,
-  //     });
-  //   });
-  // }
 
   _setupParticipantEvents(participant) {
     participant.on("pinToggled", ({

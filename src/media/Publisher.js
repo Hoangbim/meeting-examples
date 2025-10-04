@@ -360,10 +360,24 @@ export default class Publisher {
 
     await this.sendPublisherState();
 
-    setInterval(() => {
+    const workerInterval = new Worker("polyfills/intervalWorker.js");
+    workerInterval.postMessage({ interval: 1000 });
+    let lastPingTime = Date.now();
+
+    workerInterval.onmessage = (e) => {
       const ping = new TextEncoder().encode("ping");
       this.sendOverEventStream(ping);
-    }, 500);
+      if (Date.now() - lastPingTime > 1200) {
+        console.warn("Ping delay detected, connection may be unstable");
+      }
+      lastPingTime = Date.now();
+    };
+
+    // setInterval(() => {
+    //   const ping = new TextEncoder().encode("ping");
+    //   this.sendOverEventStream(ping);
+    //   console.log("Ping sent to server");
+    // }, 500);
   }
 
   setupEventStreamReader(reader) {
@@ -481,14 +495,6 @@ export default class Publisher {
         console.error(`Error reading from stream ${channelName}:`, err);
       }
     })();
-
-    setInterval(() => {
-      const streamData = this.publishStreams.get(channelName);
-      if (streamData && this.isChannelOpen) {
-        const ping = new TextEncoder().encode("ping");
-        this.sendOverStream(channelName, ping).catch(() => {});
-      }
-    }, 500);
   }
 
   async sendOverStream(channelName, frameBytes) {

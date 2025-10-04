@@ -334,23 +334,6 @@ class Room extends EventEmitter {
   /**
    * Pin a participant's video
    */
-  // pinParticipant(userId) {
-  //   const participant = this.participants.get(userId);
-  //   if (!participant) return false;
-
-  //   // Unpin current participant
-  //   if (this.pinnedParticipant) {
-  //     this.pinnedParticipant.isPinned = false;
-  //   }
-
-  //   // Pin new participant
-  //   participant.isPinned = true;
-  //   this.pinnedParticipant = participant;
-
-  //   this.emit("participantPinned", { room: this, participant });
-
-  //   return true;
-  // }
 
   pinParticipant(userId) {
     const participant = this.participants.get(userId);
@@ -664,25 +647,6 @@ class Room extends EventEmitter {
   /**
    * Setup event listeners for a participant
    */
-  // _setupParticipantEvents(participant) {
-  //   participant.on("pinToggled", ({ participant: p, pinned }) => {
-  //     if (pinned) {
-  //       this.pinParticipant(p.userId);
-  //     } else if (this.pinnedParticipant === p) {
-  //       this.unpinParticipant();
-  //     }
-  //     this.renderParticipantTiles();
-  //   });
-
-  //   participant.on("error", ({ participant: p, error, action }) => {
-  //     this.emit("participantError", {
-  //       room: this,
-  //       participant: p,
-  //       error,
-  //       action,
-  //     });
-  //   });
-  // }
 
   _setupParticipantEvents(participant) {
     participant.on("pinToggled", ({ participant: p, pinned }) => {

@@ -230,6 +230,15 @@ class Participant extends EventEmitter {
    * Toggle pin status
    */
   togglePin() {
+    if (!this.isLocal) {
+      if (this.isPinned) {
+        this.subscriber?.switchBitrate("360p");
+        console.warn("Unpin participant, switch to low quality");
+      } else {
+        this.subscriber?.switchBitrate("720p");
+        console.warn("Pin participant, switch to high quality");
+      }
+    }
     this.isPinned = !this.isPinned;
     this.emit("pinToggled", { participant: this, pinned: this.isPinned });
   }

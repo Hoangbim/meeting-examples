@@ -289,13 +289,12 @@ function setupWebSocket(initialQuality = "360p") {
 }
 
 function handleBitrateSwitch(quality) {
-  console.log(`Switching bitrate to ${quality}`);
-
   // Gửi yêu cầu lên server
   if (mediaWebsocket && mediaWebsocket.readyState === WebSocket.OPEN) {
     const message = {
       quality,
     };
+    console.log(`Switching bitrate to ${quality}, message:`, message);
     mediaWebsocket.send(JSON.stringify(message));
 
     // Chuyển decoder
