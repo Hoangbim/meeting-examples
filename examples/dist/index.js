@@ -1208,7 +1208,23 @@ class Publisher {
     if (!streamData.configSent) return;
     const chunkData = new ArrayBuffer(chunk.byteLength);
     chunk.copyTo(chunkData);
-    const type = chunk.type === "key" ? "video-key" : "video-delta";
+    let type;
+    switch (channelName) {
+      case "cam_360p":
+        type = chunk.type === "key" ? 0 : 1;
+        break;
+      case "cam_720p":
+        type = chunk.type === "key" ? 2 : 3;
+        break;
+      case "screen_share_1080p":
+        type = chunk.type === "key" ? 4 : 5;
+        break;
+      default:
+        type = 8;
+      // other
+    }
+    // const type = chunk.type === "key" ? "video-key" : "video-delta";
+
     const packet = this.createPacketWithHeader(chunkData, chunk.timestamp, type);
     this.sendOverStream(channelName, packet);
     this.sequenceNumber++;
@@ -1220,9 +1236,10 @@ class Publisher {
     if (!streamData) return;
     try {
       const dataArray = new Uint8Array(typedArray);
+      // Check for Opus header "OggS"
       if (dataArray.length >= 4 && dataArray[0] === 79 && dataArray[1] === 103 && dataArray[2] === 103 && dataArray[3] === 83) {
         if (!streamData.configSent && !streamData.config) {
-          const description = this.createPacketWithHeader(dataArray, performance.now() * 1000, "audio");
+          const description = this.createPacketWithHeader(dataArray, performance.now() * 1000, 6);
           const audioConfig = {
             codec: "opus",
             sampleRate: 48000,
@@ -1246,7 +1263,7 @@ class Publisher {
         }
         const timestamp = this.opusBaseTime + Math.floor(this.opusSamplesSent * 1000000 / this.kSampleRate);
         if (streamData.configSent) {
-          const packet = this.createPacketWithHeader(dataArray, timestamp, "audio");
+          const packet = this.createPacketWithHeader(dataArray, timestamp, 6);
           this.sendOverStream(channelName, packet);
         }
       }
@@ -1312,9 +1329,18 @@ class Publisher {
     if (safeTimestamp > MAX_TS) safeTimestamp = MAX_TS;
     if (safeTimestamp < MIN_TS) safeTimestamp = MIN_TS;
     const packet = new Uint8Array(HEADER_SIZE + (data instanceof ArrayBuffer ? data.byteLength : data.length));
-    let frameType = 2;
-    if (type === "video-key") frameType = 0;else if (type === "video-delta") frameType = 1;else if (type === "audio") frameType = 2;else if (type === "config") frameType = 3;else frameType = 4;
-    packet[4] = frameType;
+    // type mapping
+    // video-360p-key = 0
+    // video-360p-delta = 1
+    // video-720p-key = 2
+    // video-720p-delta = 3
+    // video-1080p-key = 4
+    // video-1080p-delta = 5
+    // audio = 6
+    // config = 7
+    // other = 8
+
+    packet[4] = type;
     const view = new DataView(packet.buffer, 0, 4);
     view.setUint32(0, safeTimestamp, false);
     packet.set(data instanceof ArrayBuffer ? new Uint8Array(data) : data, HEADER_SIZE);
@@ -1428,7 +1454,7 @@ class Subscriber extends EventEmitter$1 {
     this.isOwnStream = config.isOwnStream || false;
 
     // Media configuration
-    this.mediaWorkerUrl = config.mediaWorkerUrl || "workers/media-worker.js";
+    this.mediaWorkerUrl = config.mediaWorkerUrl || "workers/media-worker-ab.js";
     this.audioWorkletUrl = config.audioWorkletUrl || "workers/audio-worklet1.js";
     this.mstgPolyfillUrl = config.mstgPolyfillUrl || "polyfills/MSTG_polyfill.js";
 
@@ -1542,7 +1568,7 @@ class Subscriber extends EventEmitter$1 {
     }
     try {
       this.worker.postMessage({
-        type: "toggle-audio"
+        type: "toggleAudio"
       });
       this.isAudioEnabled = !this.isAudioEnabled;
       this.emit("audioToggled", {
@@ -1612,17 +1638,27 @@ class Subscriber extends EventEmitter$1 {
           action: "workerError"
         });
       };
-      const mediaUrl = `wss://${this.host}/meeting/${this.roomId}/${this.streamId}`;
+      const mediaUrl = `wss://sfu-adaptive-bitrate.ermis-network.workers.dev/meeting/${this.roomId}/${this.streamId}`;
       console.log("try to init worker with url:", mediaUrl);
       this.worker.postMessage({
         type: "init",
         data: {
           mediaUrl
         },
-        port: channelPort
+        port: channelPort,
+        quality: "360p" // default quality
       }, [channelPort]);
     } catch (error) {
       throw new Error(`Worker initialization failed: ${error.message}`);
+    }
+  }
+  switchBitrate(quality) {
+    // 360p | 720p
+    if (this.worker) {
+      this.worker.postMessage({
+        type: "switchBitrate",
+        quality
+      });
     }
   }
 

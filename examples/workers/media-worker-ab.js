@@ -203,20 +203,20 @@ function startSendingAudio(interval) {
 }
 
 self.onmessage = async function (e) {
-  const { type, data, port } = e.data;
+  const { type, data, port, quality } = e.data;
   switch (type) {
     case "init":
       mediaUrl = data.mediaUrl;
       console.log("Media Worker: Initializing with stream url:", mediaUrl);
       await initializeDecoders();
-      setupWebSocket();
+      setupWebSocket(quality);
       if (port && port instanceof MessagePort) {
         console.log("Media Worker: Received port to connect to Audio Worklet.");
         workletPort = port;
       }
       break;
 
-    case "toggle-audio":
+    case "toggleAudio":
       audioEnabled = !audioEnabled;
       console.log(
         "Media Worker: Toggling audio. Now audioEnabled =",
@@ -226,7 +226,7 @@ self.onmessage = async function (e) {
       break;
 
     case "switchBitrate":
-      handleBitrateSwitch(data.quality);
+      handleBitrateSwitch(quality);
       break;
 
     case "reset":
@@ -272,10 +272,11 @@ async function initializeDecoders() {
   }
 }
 
-function setupWebSocket() {
+function setupWebSocket(initialQuality = "360p") {
   mediaWebsocket = new WebSocket(mediaUrl);
   mediaWebsocket.binaryType = "arraybuffer";
   mediaWebsocket.onopen = () => {
+    mediaWebsocket.send(JSON.stringify({ quality: initialQuality }));
     self.postMessage({
       type: "log",
       level: "info",
@@ -293,7 +294,7 @@ function handleBitrateSwitch(quality) {
   // Gửi yêu cầu lên server
   if (mediaWebsocket && mediaWebsocket.readyState === WebSocket.OPEN) {
     const message = {
-      quality: quality === "360p" ? "cam_360p" : "cam_720p",
+      quality,
     };
     mediaWebsocket.send(JSON.stringify(message));
 
@@ -464,10 +465,9 @@ function handleMediaWsMessage(event) {
           data,
         });
 
-        // Chỉ decode nếu đang dùng decoder này
-        if (currentQuality === "360p") {
-          videoDecoder360p.decode(encodedChunk);
-        }
+        // if (currentQuality === "360p") {
+        videoDecoder360p.decode(encodedChunk);
+        // }
       }
       return;
     } else if (frameType === 2 || frameType === 3) {
@@ -489,10 +489,9 @@ function handleMediaWsMessage(event) {
           data,
         });
 
-        // Chỉ decode nếu đang dùng decoder này
-        if (currentQuality === "720p") {
-          videoDecoder720p.decode(encodedChunk);
-        }
+        // if (currentQuality === "720p") {
+        videoDecoder720p.decode(encodedChunk);
+        // }
       }
       return;
     } else if (frameType === 7) {

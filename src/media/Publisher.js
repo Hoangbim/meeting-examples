@@ -740,11 +740,7 @@ export default class Publisher {
           Math.floor((this.opusSamplesSent * 1000000) / this.kSampleRate);
 
         if (streamData.configSent) {
-          const packet = this.createPacketWithHeader(
-            dataArray,
-            timestamp,
-            "audio"
-          );
+          const packet = this.createPacketWithHeader(dataArray, timestamp, 6);
 
           this.sendOverStream(channelName, packet);
         }
@@ -828,6 +824,7 @@ export default class Publisher {
       HEADER_SIZE +
         (data instanceof ArrayBuffer ? data.byteLength : data.length)
     );
+    // type mapping
     // video-360p-key = 0
     // video-360p-delta = 1
     // video-720p-key = 2
