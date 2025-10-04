@@ -661,7 +661,21 @@ export default class Publisher {
 
     const chunkData = new ArrayBuffer(chunk.byteLength);
     chunk.copyTo(chunkData);
-    const type = chunk.type === "key" ? "video-key" : "video-delta";
+    let type;
+    switch (channelName) {
+      case "cam_360p":
+        type = chunk.type === "key" ? 0 : 1;
+        break;
+      case "cam_720p":
+        type = chunk.type === "key" ? 2 : 3;
+        break;
+      case "screen_share_1080p":
+        type = chunk.type === "key" ? 4 : 5;
+        break;
+      default:
+        type = 8; // other
+    }
+    // const type = chunk.type === "key" ? "video-key" : "video-delta";
 
     const packet = this.createPacketWithHeader(
       chunkData,
@@ -683,7 +697,7 @@ export default class Publisher {
 
     try {
       const dataArray = new Uint8Array(typedArray);
-
+      // Check for Opus header "OggS"
       if (
         dataArray.length >= 4 &&
         dataArray[0] === 79 &&
@@ -695,7 +709,7 @@ export default class Publisher {
           const description = this.createPacketWithHeader(
             dataArray,
             performance.now() * 1000,
-            "audio"
+            6
           );
 
           const audioConfig = {
@@ -814,15 +828,17 @@ export default class Publisher {
       HEADER_SIZE +
         (data instanceof ArrayBuffer ? data.byteLength : data.length)
     );
+    // video-360p-key = 0
+    // video-360p-delta = 1
+    // video-720p-key = 2
+    // video-720p-delta = 3
+    // video-1080p-key = 4
+    // video-1080p-delta = 5
+    // audio = 6
+    // config = 7
+    // other = 8
 
-    let frameType = 2;
-    if (type === "video-key") frameType = 0;
-    else if (type === "video-delta") frameType = 1;
-    else if (type === "audio") frameType = 2;
-    else if (type === "config") frameType = 3;
-    else frameType = 4;
-
-    packet[4] = frameType;
+    packet[4] = type;
 
     const view = new DataView(packet.buffer, 0, 4);
     view.setUint32(0, safeTimestamp, false);

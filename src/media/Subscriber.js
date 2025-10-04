@@ -207,6 +207,15 @@ class Subscriber extends EventEmitter {
     }
   }
 
+  switchBitrate(bitrateKbps) {
+    if (this.worker) {
+      this.worker.postMessage({
+        type: "switch-bitrate",
+        bitrateKbps,
+      });
+    }
+  }
+
   /**
    * Initialize audio system with mixer
    */
