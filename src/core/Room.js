@@ -275,6 +275,7 @@ class Room extends EventEmitter {
       role: memberData.role,
       roomId: this.id,
       isLocal,
+      isScreenSharing: memberData.is_screen_sharing || false,
     });
 
     // Setup participant events
@@ -499,6 +500,133 @@ class Room extends EventEmitter {
   }
 
   /**
+   * Setup screen share button UI and event handlers
+   * Call this method after local participant tile is created
+   */
+  setupScreenShareButton() {
+    if (!this.localParticipant || !this.localParticipant.tile) {
+      console.warn(
+        "Local participant or tile not available for screen share setup"
+      );
+      return;
+    }
+
+    const btn = this.localParticipant.tile.querySelector(
+      `#screenShareBtn-${this.localParticipant.streamId}`
+    );
+    if (!btn) {
+      console.warn("Screen share button not found in local participant tile");
+      return;
+    }
+
+    let isScreenSharing = false;
+
+    // Button click handler - directly call room's screen share methods
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+
+      try {
+        if (!isScreenSharing) {
+          // Call room's startScreenShare method
+          await this.startScreenShare();
+          isScreenSharing = true;
+          btn.classList.add("sharing");
+
+          // Update button icon or text if needed
+          const svg = btn.querySelector("svg");
+          if (svg) {
+            svg.style.color = "#4CAF50"; // Green when sharing
+          }
+        } else {
+          // Call room's stopScreenShare method
+          await this.stopScreenShare();
+          isScreenSharing = false;
+          btn.classList.remove("sharing");
+
+          // Reset button icon color
+          const svg = btn.querySelector("svg");
+          if (svg) {
+            svg.style.color = "white"; // Default color
+          }
+        }
+      } catch (error) {
+        console.error("Screen share button error:", error);
+        // Reset button state on error
+        isScreenSharing = false;
+        btn.classList.remove("sharing");
+        const svg = btn.querySelector("svg");
+        if (svg) {
+          svg.style.color = "white";
+        }
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    // Listen to room events to sync button state
+    this.on("screenShareStarted", () => {
+      isScreenSharing = true;
+      btn.classList.add("sharing");
+      btn.disabled = false;
+
+      // Update local participant state
+      if (this.localParticipant) {
+        this.localParticipant.isScreenSharing = true;
+      }
+
+      // Update button visual
+      const svg = btn.querySelector("svg");
+      if (svg) {
+        svg.style.color = "#4CAF50";
+      }
+    });
+
+    this.on("screenShareStopped", () => {
+      isScreenSharing = false;
+      btn.classList.remove("sharing");
+      btn.disabled = false;
+
+      // Update local participant state
+      if (this.localParticipant) {
+        this.localParticipant.isScreenSharing = false;
+      }
+
+      // Reset button visual
+      const svg = btn.querySelector("svg");
+      if (svg) {
+        svg.style.color = "white";
+      }
+    });
+
+    this.on("screenShareStarting", () => {
+      btn.disabled = true; // Disable during transition
+    });
+
+    this.on("screenShareStopping", () => {
+      btn.disabled = true; // Disable during transition
+    });
+
+    this.on("error", ({ action, error }) => {
+      if (action === "startScreenShare" || action === "stopScreenShare") {
+        // Reset button state on screen share errors
+        isScreenSharing = false;
+        btn.classList.remove("sharing");
+        btn.disabled = false;
+
+        const svg = btn.querySelector("svg");
+        if (svg) {
+          svg.style.color = "white";
+        }
+
+        // Update participant state
+        if (this.localParticipant) {
+          this.localParticipant.isScreenSharing = false;
+        }
+      }
+    });
+  }
+
+  /**
    * Setup publisher for local participant
    */
   async _setupLocalPublisher() {
@@ -527,7 +655,7 @@ class Room extends EventEmitter {
       publishUrl,
       streamType: "camera",
       videoElement: this.localParticipant.videoElement,
-      streamId: "camera_stream",
+      streamId: this.localParticipant.streamId,
       width: 1280,
       height: 720,
       framerate: 30,
@@ -544,6 +672,9 @@ class Room extends EventEmitter {
 
     await publisher.startPublishing();
     this.localParticipant.setPublisher(publisher);
+
+    // Setup screen share button in participant tile
+    this.setupScreenShareButton();
   }
 
   /**
@@ -555,6 +686,7 @@ class Room extends EventEmitter {
       roomId: this.id,
       host: this.mediaConfig.host,
       videoElement: participant.videoElement,
+      isScreenSharing: false,
       onStatus: (msg, isError) => {
         participant.setConnectionStatus(isError ? "failed" : "connected");
       },
@@ -568,6 +700,14 @@ class Room extends EventEmitter {
 
     await subscriber.start();
     participant.setSubscriber(subscriber);
+
+    if (participant.isScreenSharing) {
+      await this.handleRemoteScreenShare(
+        participant.userId,
+        participant.streamId,
+        true
+      );
+    }
   }
 
   /**
@@ -575,28 +715,6 @@ class Room extends EventEmitter {
    */
   async _handleServerEvent(event) {
     console.log("Received server event:", event);
-    // if (event.type === "join") {
-    //   const joinedParticipant = event.participant;
-    //   if (joinedParticipant.user_id === this.localParticipant?.userId) return;
-
-    //   const participant = this.addParticipant(
-    //     {
-    //       user_id: joinedParticipant.user_id,
-    //       stream_id: joinedParticipant.stream_id,
-    //       id: joinedParticipant.membership_id,
-    //       role: joinedParticipant.role,
-    //     },
-    //     this.localParticipant?.userId
-    //   );
-
-    //   this.renderParticipantTiles();
-    //   await this._setupRemoteSubscriber(participant);
-    // }
-
-    // if (event.type === "leave") {
-    //   this.removeParticipant(event.participant.user_id);
-    //   this.renderParticipantTiles();
-    // }
     if (event.type === "join") {
       const joinedParticipant = event.participant;
       if (joinedParticipant.user_id === this.localParticipant?.userId) return;
@@ -642,6 +760,26 @@ class Room extends EventEmitter {
         }
       }
     }
+
+    if (event.type === "start_share_screen") {
+      const participant = event.participant;
+      if (participant.user_id === this.localParticipant?.userId) return;
+      await this.handleRemoteScreenShare(
+        participant.user_id,
+        participant.stream_id,
+        true
+      );
+    }
+
+    if (event.type === "stop_share_screen") {
+      const participant = event.participant;
+      if (participant.user_id === this.localParticipant?.userId) return;
+      await this.handleRemoteScreenShare(
+        participant.user_id,
+        participant.stream_id,
+        false
+      );
+    }
   }
 
   /**
@@ -656,7 +794,6 @@ class Room extends EventEmitter {
         this.unpinParticipant();
       }
 
-      // Chỉ di chuyển tile của participant này
       this._moveParticipantTile(p);
     });
 
@@ -684,6 +821,119 @@ class Room extends EventEmitter {
       this.mainVideoArea.appendChild(participant.tile);
     } else if (!participant.isPinned && this.sidebarArea) {
       this.sidebarArea.appendChild(participant.tile);
+    }
+  }
+
+  /**
+   * Start screen sharing for local participant
+   */
+  async startScreenShare() {
+    if (!this.localParticipant || !this.localParticipant.publisher) {
+      throw new Error("Local participant or publisher not available");
+    }
+
+    try {
+      this.emit("screenShareStarting", { room: this });
+
+      // Get display media
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { width: 1920, height: 1080 },
+        audio: true,
+      });
+
+      // Start screen share through publisher
+      await this.localParticipant.publisher.startShareScreen(screenStream);
+
+      this.emit("screenShareStarted", { room: this });
+      return screenStream;
+    } catch (error) {
+      this.emit("error", { room: this, error, action: "startScreenShare" });
+      throw error;
+    }
+  }
+
+  /**
+   * Stop screen sharing for local participant
+   */
+  async stopScreenShare() {
+    if (!this.localParticipant || !this.localParticipant.publisher) {
+      throw new Error("Local participant or publisher not available");
+    }
+
+    try {
+      this.emit("screenShareStopping", { room: this });
+
+      await this.localParticipant.publisher.stopShareScreen();
+
+      this.emit("screenShareStopped", { room: this });
+    } catch (error) {
+      this.emit("error", { room: this, error, action: "stopScreenShare" });
+      throw error;
+    }
+  }
+
+  /**
+   * Handle remote screen share
+   */
+  async handleRemoteScreenShare(participantId, screenStreamId, isStarting) {
+    const participant = this.participants.get(participantId);
+    if (!participant) return;
+
+    if (isStarting) {
+      // Create screen share tile
+      const screenTile = participant.createScreenShareTile();
+
+      // Append to main video area (screen share takes priority)
+      if (this.mainVideoArea) {
+        this.mainVideoArea.innerHTML = "";
+        this.mainVideoArea.appendChild(screenTile);
+      }
+
+      // Create subscriber for screen share
+      const screenSubscriber = new Subscriber({
+        streamId: screenStreamId,
+        roomId: this.id,
+        host: this.mediaConfig.host,
+        videoElement: participant.screenVideoElement,
+        isScreenSharing: true,
+        onStatus: (msg, isError) => {
+          console.log(`Screen share status: ${msg}`);
+        },
+        audioWorkletUrl: "workers/audio-worklet1.js",
+        mstgPolyfillUrl: "polyfills/MSTG_polyfill.js",
+      });
+
+      // Add to audio mixer if has audio
+      if (this.audioMixer) {
+        screenSubscriber.setAudioMixer(this.audioMixer);
+      }
+
+      await screenSubscriber.start();
+
+      // Store reference
+      participant.screenSubscriber = screenSubscriber;
+      participant.isScreenSharing = true;
+      // participant.setScreenSubscriber(screenSubscriber);
+
+      this.emit("remoteScreenShareStarted", { room: this, participant });
+    } else {
+      // Stop screen share
+      if (participant.screenSubscriber) {
+        participant.screenSubscriber.stop();
+        participant.screenSubscriber = null;
+      }
+
+      participant.removeScreenShareTile();
+
+      // Restore pinned participant to main video
+      if (this.pinnedParticipant && this.pinnedParticipant.tile) {
+        if (this.mainVideoArea) {
+          this.mainVideoArea.innerHTML = "";
+          this.mainVideoArea.appendChild(this.pinnedParticipant.tile);
+        }
+      }
+
+      this.emit("remoteScreenShareStopped", { room: this, participant });
     }
   }
 

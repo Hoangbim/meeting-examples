@@ -27,6 +27,12 @@ class Participant extends EventEmitter {
 
     // Status
     this.connectionStatus = "disconnected"; // 'connecting', 'connected', 'disconnected', 'failed'
+
+    // Screen share state
+    this.isScreenSharing = config.isScreenSharing || false;
+    this.screenTile = null;
+    this.screenVideoElement = null;
+    this.screenSubscriber = null;
   }
 
   /**
@@ -81,6 +87,12 @@ class Participant extends EventEmitter {
             <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
           </svg>
         </button>
+
+        <button class="screen-share-btn" id="screenShareBtn-${this.streamId}">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/>
+  </svg>
+</button>
         <button class="pin-btn" id="pinBtn-${this.streamId}">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
             <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z"/>
@@ -111,6 +123,53 @@ class Participant extends EventEmitter {
         </button>
       </div>
     `;
+  }
+
+  /**
+   * Create screen share tile
+   */
+  createScreenShareTile() {
+    const tile = document.createElement("div");
+    tile.className = "video-tile screen-share-tile";
+    tile.setAttribute("data-user-id", this.userId);
+    tile.setAttribute("data-stream-id", `${this.streamId}_screen`);
+
+    tile.innerHTML = `
+    <video autoplay playsinline></video>
+    <div class="user-label">${this.getDisplayName()} - Screen Share</div>
+    <div class="screen-controls">
+      <button class="stop-share-btn" id="stopShareBtn-${this.streamId}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+        </svg>
+        Stop Sharing
+      </button>
+    </div>
+  `;
+
+    this.screenTile = tile;
+    this.screenVideoElement = tile.querySelector("video");
+
+    // Setup stop button
+    const stopBtn = tile.querySelector(`#stopShareBtn-${this.streamId}`);
+    stopBtn?.addEventListener("click", () => {
+      this.emit("stopScreenShare", { participant: this });
+    });
+
+    this.emit("screenTileCreated", { participant: this, tile });
+    return tile;
+  }
+
+  /**
+   * Remove screen share tile
+   */
+  removeScreenShareTile() {
+    if (this.screenTile && this.screenTile.parentNode) {
+      this.screenTile.parentNode.removeChild(this.screenTile);
+    }
+    this.screenTile = null;
+    this.screenVideoElement = null;
+    this.isScreenSharing = false;
   }
 
   /**
@@ -382,6 +441,20 @@ class Participant extends EventEmitter {
   }
 
   /**
+   * Set screen share subscriber
+   */
+  // setScreenSubscriber(subscriber) {
+  //   this.screenSubscriber = subscriber;
+  //   if (subscriber) {
+  //     this.isScreenSharing = true;
+  //     this.emit("screenShareStarted", { participant: this });
+  //   } else {
+  //     this.isScreenSharing = false;
+  //     this.emit("screenShareStopped", { participant: this });
+  //   }
+  // }
+
+  /**
    * Cleanup participant resources
    */
   cleanup() {
@@ -406,6 +479,15 @@ class Participant extends EventEmitter {
 
     this.setConnectionStatus("disconnected");
     this.removeAllListeners();
+
+    // Cleanup screen share
+    this.removeScreenShareTile();
+
+    // Stop screen subscriber
+    if (this.screenSubscriber) {
+      this.screenSubscriber.stop();
+      this.screenSubscriber = null;
+    }
 
     this.emit("cleanup", { participant: this });
   }

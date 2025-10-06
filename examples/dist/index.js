@@ -270,6 +270,12 @@ class Participant extends EventEmitter$1 {
 
     // Status
     this.connectionStatus = "disconnected"; // 'connecting', 'connected', 'disconnected', 'failed'
+
+    // Screen share state
+    this.isScreenSharing = config.isScreenSharing || false;
+    this.screenTile = null;
+    this.screenVideoElement = null;
+    this.screenSubscriber = null;
   }
 
   /**
@@ -324,6 +330,12 @@ class Participant extends EventEmitter$1 {
             <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
           </svg>
         </button>
+
+        <button class="screen-share-btn" id="screenShareBtn-${this.streamId}">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/>
+  </svg>
+</button>
         <button class="pin-btn" id="pinBtn-${this.streamId}">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
             <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z"/>
@@ -354,6 +366,55 @@ class Participant extends EventEmitter$1 {
         </button>
       </div>
     `;
+  }
+
+  /**
+   * Create screen share tile
+   */
+  createScreenShareTile() {
+    const tile = document.createElement("div");
+    tile.className = "video-tile screen-share-tile";
+    tile.setAttribute("data-user-id", this.userId);
+    tile.setAttribute("data-stream-id", `${this.streamId}_screen`);
+    tile.innerHTML = `
+    <video autoplay playsinline></video>
+    <div class="user-label">${this.getDisplayName()} - Screen Share</div>
+    <div class="screen-controls">
+      <button class="stop-share-btn" id="stopShareBtn-${this.streamId}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+        </svg>
+        Stop Sharing
+      </button>
+    </div>
+  `;
+    this.screenTile = tile;
+    this.screenVideoElement = tile.querySelector("video");
+
+    // Setup stop button
+    const stopBtn = tile.querySelector(`#stopShareBtn-${this.streamId}`);
+    stopBtn?.addEventListener("click", () => {
+      this.emit("stopScreenShare", {
+        participant: this
+      });
+    });
+    this.emit("screenTileCreated", {
+      participant: this,
+      tile
+    });
+    return tile;
+  }
+
+  /**
+   * Remove screen share tile
+   */
+  removeScreenShareTile() {
+    if (this.screenTile && this.screenTile.parentNode) {
+      this.screenTile.parentNode.removeChild(this.screenTile);
+    }
+    this.screenTile = null;
+    this.screenVideoElement = null;
+    this.isScreenSharing = false;
   }
 
   /**
@@ -619,6 +680,20 @@ class Participant extends EventEmitter$1 {
   }
 
   /**
+   * Set screen share subscriber
+   */
+  // setScreenSubscriber(subscriber) {
+  //   this.screenSubscriber = subscriber;
+  //   if (subscriber) {
+  //     this.isScreenSharing = true;
+  //     this.emit("screenShareStarted", { participant: this });
+  //   } else {
+  //     this.isScreenSharing = false;
+  //     this.emit("screenShareStopped", { participant: this });
+  //   }
+  // }
+
+  /**
    * Cleanup participant resources
    */
   cleanup() {
@@ -640,6 +715,15 @@ class Participant extends EventEmitter$1 {
     this.tile = null;
     this.setConnectionStatus("disconnected");
     this.removeAllListeners();
+
+    // Cleanup screen share
+    this.removeScreenShareTile();
+
+    // Stop screen subscriber
+    if (this.screenSubscriber) {
+      this.screenSubscriber.stop();
+      this.screenSubscriber = null;
+    }
     this.emit("cleanup", {
       participant: this
     });
@@ -740,9 +824,9 @@ class Publisher {
       channelName: "cam_720p"
     }, {
       name: "low",
-      width: 854,
-      height: 480,
-      bitrate: 500_000,
+      width: 640,
+      height: 360,
+      bitrate: 400_000,
       framerate: 30,
       channelName: "cam_360p"
     }, {
@@ -980,13 +1064,13 @@ class Publisher {
     await this.sendPublisherState();
     const workerInterval = new Worker("polyfills/intervalWorker.js");
     workerInterval.postMessage({
-      interval: 500
+      interval: 1000
     });
     let lastPingTime = Date.now();
     workerInterval.onmessage = e => {
       const ping = new TextEncoder().encode("ping");
       this.sendOverEventStream(ping);
-      if (Date.now() - lastPingTime > 700) {
+      if (Date.now() - lastPingTime > 1200) {
         console.warn("Ping delay detected, connection may be unstable");
       }
       lastPingTime = Date.now();
@@ -1012,6 +1096,7 @@ class Publisher {
           }
           if (value) {
             const msg = new TextDecoder().decode(value);
+            console.log("Received event from event:", msg);
             try {
               const event = JSON.parse(msg);
               this.onServerEvent(event);
@@ -1029,6 +1114,9 @@ class Publisher {
     if (!this.eventStream) {
       console.error("Event stream not available");
       return;
+    }
+    if (typeof data === "string") {
+      console.warn("Sending over event stream:", data);
     }
     try {
       const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
@@ -1077,33 +1165,34 @@ class Publisher {
     console.log(`WebTransport bidirectional stream (${channelName}) established`);
     const initData = new TextEncoder().encode(channelName);
     await this.sendOverStream(channelName, initData);
-    this.setupStreamReader(channelName, reader);
+
+    // this.setupStreamReader(channelName, reader);
+
     console.log(`Stream created: ${channelName}`);
   }
-  setupStreamReader(channelName, reader) {
-    (async () => {
-      try {
-        while (true) {
-          const {
-            value,
-            done
-          } = await reader.read();
-          if (done) {
-            console.log(`Stream ${channelName} closed by server`);
-            break;
-          }
-          if (value) {
-            const msg = new TextDecoder().decode(value);
-            if (msg.startsWith("ack:") || msg.startsWith("config:")) {
-              console.log(`${channelName} received:`, msg);
-            }
-          }
-        }
-      } catch (err) {
-        console.error(`Error reading from stream ${channelName}:`, err);
-      }
-    })();
-  }
+
+  // setupStreamReader(channelName, reader) {
+  //   (async () => {
+  //     try {
+  //       while (true) {
+  //         const { value, done } = await reader.read();
+  //         if (done) {
+  //           console.log(`Stream ${channelName} closed by server`);
+  //           break;
+  //         }
+  //         if (value) {
+  //           const msg = new TextDecoder().decode(value);
+  //           if (msg.startsWith("ack:") || msg.startsWith("config:")) {
+  //             console.log(`${channelName} received:`, msg);
+  //           }
+  //         }
+  //       }
+  //     } catch (err) {
+  //       console.error(`Error reading from stream ${channelName}:`, err);
+  //     }
+  //   })();
+  // }
+
   async sendOverStream(channelName, frameBytes) {
     const streamData = this.publishStreams.get(channelName);
     if (!streamData) {
@@ -1122,6 +1211,291 @@ class Publisher {
       throw error;
     }
   }
+
+  // ===== SCREEN SHARE FUNCTIONS =====
+
+  async startShareScreen(stream) {
+    if (!stream) {
+      throw new Error("No stream provided for screen sharing");
+    }
+
+    // Store screen share stream
+    this.screenStream = stream;
+    this.isScreenSharing = true;
+    const channelName = "screen_share_1080p";
+    try {
+      // Create WebTransport stream for screen share
+      await this.createBidirectionalStream(channelName);
+      const startEvent = {
+        type: "start_share_screen",
+        sender_stream_id: this.streamId
+      };
+      await this.sendEvent(startEvent);
+      const videoTrack = stream.getVideoTracks()[0];
+      const audioTrack = stream.getAudioTracks()[0];
+      if (!videoTrack) {
+        throw new Error("No video track found in screen share stream");
+      }
+
+      // Setup screen share video encoder
+      const screenConfig = this.subStreams.find(s => s.channelName === channelName);
+      const screenEncoder = new VideoEncoder({
+        output: (chunk, metadata) => this.handleScreenVideoChunk(chunk, metadata, channelName),
+        error: e => this.onStatusUpdate(`Screen encoder error: ${e.message}`, true)
+      });
+      const encoderConfig = {
+        codec: this.currentConfig.codec,
+        width: screenConfig.width,
+        height: screenConfig.height,
+        bitrate: screenConfig.bitrate,
+        framerate: screenConfig.framerate,
+        latencyMode: "realtime",
+        hardwareAcceleration: "prefer-hardware"
+      };
+      screenEncoder.configure(encoderConfig);
+      this.screenVideoEncoder = {
+        encoder: screenEncoder,
+        config: encoderConfig,
+        metadataReady: false,
+        videoDecoderConfig: null
+      };
+
+      // Setup screen share audio if available
+      if (audioTrack) {
+        const audioRecorderOptions = {
+          encoderApplication: 2051,
+          encoderComplexity: 0,
+          encoderFrameSize: 20,
+          timeSlice: 100
+        };
+        this.screenAudioRecorder = await this.initAudioRecorder(audioTrack, audioRecorderOptions);
+        this.screenAudioRecorder.ondataavailable = typedArray => this.handleScreenAudioChunk(typedArray, channelName);
+        await this.screenAudioRecorder.start({
+          timeSlice: audioRecorderOptions.timeSlice
+        });
+        this.screenAudioBaseTime = 0;
+        this.screenAudioSamplesSent = 0;
+      }
+
+      // Start video processing
+      const triggerWorker = new Worker("polyfills/triggerWorker.js");
+      triggerWorker.postMessage({
+        frameRate: screenConfig.framerate
+      });
+      this.screenVideoProcessor = new MediaStreamTrackProcessor(videoTrack, triggerWorker, true);
+      const reader = this.screenVideoProcessor.readable.getReader();
+      let frameCounter = 0;
+
+      // Handle video track ending (user stops sharing)
+      videoTrack.onended = () => {
+        this.stopShareScreen();
+      };
+
+      // Process screen share video frames
+      (async () => {
+        try {
+          while (this.isScreenSharing) {
+            const result = await reader.read();
+            if (result.done) break;
+            const frame = result.value;
+            if (!window.screenBaseTimestamp) {
+              window.screenBaseTimestamp = frame.timestamp;
+            }
+            frameCounter++;
+            const keyFrame = frameCounter % 30 === 0;
+            if (this.screenVideoEncoder.encoder.encodeQueueSize <= 2) {
+              this.screenVideoEncoder.encoder.encode(frame, {
+                keyFrame
+              });
+            }
+            frame.close();
+          }
+        } catch (error) {
+          this.onStatusUpdate(`Screen share video error: ${error.message}`, true);
+          console.error("Screen share video error:", error);
+        }
+      })();
+      this.onStatusUpdate("Screen sharing started");
+    } catch (error) {
+      this.onStatusUpdate(`Failed to start screen share: ${error.message}`, true);
+      this.stopShareScreen();
+      throw error;
+    }
+  }
+  async stopShareScreen() {
+    if (!this.isScreenSharing) {
+      return;
+    }
+    try {
+      this.isScreenSharing = false;
+      const channelName = "screen_share_1080p";
+
+      // send stop event to server
+      const stopEvent = {
+        type: "stop_share_screen",
+        sender_stream_id: this.streamId
+      };
+      await this.sendEvent(stopEvent);
+
+      // Stop and close video encoder
+      if (this.screenVideoEncoder && this.screenVideoEncoder.encoder) {
+        if (this.screenVideoEncoder.encoder.state !== "closed") {
+          await this.screenVideoEncoder.encoder.flush();
+          this.screenVideoEncoder.encoder.close();
+        }
+        this.screenVideoEncoder = null;
+      }
+
+      // Stop audio recorder
+      if (this.screenAudioRecorder && typeof this.screenAudioRecorder.stop === "function") {
+        await this.screenAudioRecorder.stop();
+        this.screenAudioRecorder = null;
+      }
+
+      // Close screen share stream
+      const streamData = this.publishStreams.get(channelName);
+      if (streamData && streamData.writer) {
+        await streamData.writer.close();
+        this.publishStreams.delete(channelName);
+      }
+
+      // Stop all tracks in screen stream
+      if (this.screenStream) {
+        this.screenStream.getTracks().forEach(track => track.stop());
+        this.screenStream = null;
+      }
+
+      // Reset state
+      this.screenAudioBaseTime = 0;
+      this.screenAudioSamplesSent = 0;
+      this.screenAudioConfig = null;
+      window.screenBaseTimestamp = null;
+      this.onStatusUpdate("Screen sharing stopped");
+    } catch (error) {
+      this.onStatusUpdate(`Error stopping screen share: ${error.message}`, true);
+      throw error;
+    }
+  }
+
+  // ===== HELPER FUNCTIONS FOR SCREEN SHARE =====
+
+  handleScreenVideoChunk(chunk, metadata, channelName) {
+    if (!this.screenVideoEncoder) return;
+    const streamData = this.publishStreams.get(channelName);
+    if (!streamData) return;
+
+    // Handle metadata and send decoder configs
+    if (metadata && metadata.decoderConfig && !this.screenVideoEncoder.metadataReady) {
+      this.screenVideoEncoder.videoDecoderConfig = {
+        codec: metadata.decoderConfig.codec,
+        codedWidth: metadata.decoderConfig.codedWidth,
+        codedHeight: metadata.decoderConfig.codedHeight,
+        frameRate: this.screenVideoEncoder.config.framerate,
+        description: metadata.decoderConfig.description
+      };
+      this.screenVideoEncoder.metadataReady = true;
+      console.log("Screen video config ready:", this.screenVideoEncoder.videoDecoderConfig);
+
+      // Check if we have audio config ready and send combined configs
+      this.sendScreenDecoderConfigs(channelName);
+    }
+    if (!streamData.configSent) return;
+    const chunkData = new ArrayBuffer(chunk.byteLength);
+    chunk.copyTo(chunkData);
+    const type = chunk.type === "key" ? 4 : 5; // screen_share_1080p key/delta
+
+    const packet = this.createPacketWithHeader(chunkData, chunk.timestamp, type);
+    this.sendOverStream(channelName, packet);
+  }
+  handleScreenAudioChunk(typedArray, channelName) {
+    if (!this.isScreenSharing || !typedArray || typedArray.byteLength === 0) return;
+    const streamData = this.publishStreams.get(channelName);
+    if (!streamData) return;
+    try {
+      const dataArray = new Uint8Array(typedArray);
+
+      // Check for Opus header "OggS"
+      if (dataArray.length >= 4 && dataArray[0] === 79 && dataArray[1] === 103 && dataArray[2] === 103 && dataArray[3] === 83) {
+        if (!this.screenAudioConfig) {
+          const description = this.createPacketWithHeader(dataArray, performance.now() * 1000, 6);
+          this.screenAudioConfig = {
+            codec: "opus",
+            sampleRate: 48000,
+            numberOfChannels: 2,
+            // Screen share audio is typically stereo
+            description: description
+          };
+          console.log("Screen audio config ready:", this.screenAudioConfig);
+
+          // Check if we have video config ready and send combined configs
+          this.sendScreenDecoderConfigs(channelName);
+        }
+
+        // Initialize timing
+        if (this.screenAudioBaseTime === 0 && window.screenBaseTimestamp) {
+          this.screenAudioBaseTime = window.screenBaseTimestamp;
+          this.screenAudioSamplesSent = 0;
+        } else if (this.screenAudioBaseTime === 0 && !window.screenBaseTimestamp) {
+          this.screenAudioBaseTime = performance.now() * 1000;
+          this.screenAudioSamplesSent = 0;
+        }
+        const timestamp = this.screenAudioBaseTime + Math.floor(this.screenAudioSamplesSent * 1000000 / 48000);
+        if (streamData.configSent) {
+          const packet = this.createPacketWithHeader(dataArray, timestamp, 6);
+          this.sendOverStream(channelName, packet);
+        }
+        this.screenAudioSamplesSent += 960; // 20ms at 48kHz
+      }
+    } catch (error) {
+      console.error("Failed to send screen audio data:", error);
+    }
+  }
+  async sendScreenDecoderConfigs(channelName) {
+    const streamData = this.publishStreams.get(channelName);
+    if (!streamData || streamData.configSent) return;
+
+    // Wait until both video and audio configs are ready (if audio exists)
+    const hasAudio = this.screenAudioRecorder !== null;
+    const videoReady = this.screenVideoEncoder && this.screenVideoEncoder.metadataReady;
+    const audioReady = !hasAudio || this.screenAudioConfig;
+    if (!videoReady || !audioReady) {
+      console.log("Waiting for configs... videoReady:", videoReady, "audioReady:", audioReady);
+      return; // Wait for both configs
+    }
+    try {
+      const vConfigUint8 = new Uint8Array(this.screenVideoEncoder.videoDecoderConfig.description);
+      const vConfigBase64 = this.uint8ArrayToBase64(vConfigUint8);
+      const config = {
+        type: "DecoderConfigs",
+        channelName: channelName,
+        videoConfig: {
+          codec: this.screenVideoEncoder.videoDecoderConfig.codec,
+          codedWidth: this.screenVideoEncoder.videoDecoderConfig.codedWidth,
+          codedHeight: this.screenVideoEncoder.videoDecoderConfig.codedHeight,
+          frameRate: this.screenVideoEncoder.videoDecoderConfig.frameRate,
+          description: vConfigBase64
+        }
+      };
+
+      // Add audio config if available
+      if (this.screenAudioConfig) {
+        const aConfigBase64 = this.uint8ArrayToBase64(new Uint8Array(this.screenAudioConfig.description));
+        config.audioConfig = {
+          codec: this.screenAudioConfig.codec,
+          sampleRate: this.screenAudioConfig.sampleRate,
+          numberOfChannels: this.screenAudioConfig.numberOfChannels,
+          description: aConfigBase64
+        };
+      }
+      console.log("Sending screen share decoder configs:", config);
+      const packet = new TextEncoder().encode(JSON.stringify(config));
+      await this.sendOverStream(channelName, packet);
+      streamData.configSent = true;
+      this.onStatusUpdate(`Screen share configs sent for: ${channelName}`);
+    } catch (error) {
+      console.error(`Failed to send screen share configs:`, error);
+    }
+  }
   async startStreaming() {
     // Start video capture
     await this.startVideoCapture();
@@ -1134,7 +1508,6 @@ class Publisher {
     }
     this.initVideoEncoders();
     this.videoEncoders.forEach(encoderObj => {
-      console.log(`Configuring encoder for ${encoderObj.channelName}`, encoderObj, "config", encoderObj.config);
       encoderObj.encoder.configure(encoderObj.config);
     });
     const triggerWorker = new Worker("polyfills/triggerWorker.js");
@@ -1142,10 +1515,8 @@ class Publisher {
       frameRate: this.currentConfig.framerate
     });
     const track = this.stream.getVideoTracks()[0];
-    console.log("Using video track:", track);
     this.videoProcessor = new MediaStreamTrackProcessor(track, triggerWorker, true);
     const reader = this.videoProcessor.readable.getReader();
-    console.log("Video processor reader created:", reader);
     let frameCounter = 0;
     const cameraEncoders = Array.from(this.videoEncoders.entries()).filter(([_, obj]) => obj.channelName.startsWith("cam"));
 
@@ -1467,6 +1838,8 @@ class Subscriber extends EventEmitter$1 {
     this.streamId = config.streamId || "";
     this.roomId = config.roomId || "";
     this.host = config.host || "stream-gate.bandia.vn";
+    this.userMediaWorker = config.userMediaWorker || "sfu-adaptive-bitrate.ermis-network.workers.dev";
+    this.screenShareWorker = config.screenShareWorker || "sfu-screen-share.ermis-network.workers.dev";
     this.videoElement = config.videoElement;
     this.isOwnStream = config.isOwnStream || false;
 
@@ -1492,6 +1865,9 @@ class Subscriber extends EventEmitter$1 {
 
     // Audio mixer reference (will be set externally)
     this.audioMixer = null;
+
+    // Screen share flag
+    this.isScreenSharing = config.isScreenSharing || false;
   }
 
   /**
@@ -1655,7 +2031,8 @@ class Subscriber extends EventEmitter$1 {
           action: "workerError"
         });
       };
-      const mediaUrl = `wss://sfu-adaptive-bitrate.ermis-network.workers.dev/meeting/${this.roomId}/${this.streamId}`;
+      const workerHost = this.isScreenSharing ? this.screenShareWorker : this.userMediaWorker;
+      const mediaUrl = `wss://${workerHost}/meeting/${this.roomId}/${this.streamId}`;
       console.log("try to init worker with url:", mediaUrl);
       this.worker.postMessage({
         type: "init",
@@ -1663,7 +2040,9 @@ class Subscriber extends EventEmitter$1 {
           mediaUrl
         },
         port: channelPort,
-        quality: "360p" // default quality
+        quality: "360p",
+        // default quality
+        isShare: this.isScreenSharing
       }, [channelPort]);
     } catch (error) {
       throw new Error(`Worker initialization failed: ${error.message}`);
@@ -1792,11 +2171,6 @@ class Subscriber extends EventEmitter$1 {
       type,
       frame,
       message,
-      channelData,
-      sampleRate,
-      numberOfChannels,
-      timeStamp,
-      subscriberId,
       audioEnabled
     } = e.data;
     switch (type) {
@@ -2604,7 +2978,8 @@ class Room extends EventEmitter$1 {
       membershipId: memberData.id,
       role: memberData.role,
       roomId: this.id,
-      isLocal
+      isLocal,
+      isScreenSharing: memberData.is_screen_sharing || false
     });
 
     // Setup participant events
@@ -2819,6 +3194,124 @@ class Room extends EventEmitter$1 {
   }
 
   /**
+   * Setup screen share button UI and event handlers
+   * Call this method after local participant tile is created
+   */
+  setupScreenShareButton() {
+    if (!this.localParticipant || !this.localParticipant.tile) {
+      console.warn("Local participant or tile not available for screen share setup");
+      return;
+    }
+    const btn = this.localParticipant.tile.querySelector(`#screenShareBtn-${this.localParticipant.streamId}`);
+    if (!btn) {
+      console.warn("Screen share button not found in local participant tile");
+      return;
+    }
+    let isScreenSharing = false;
+
+    // Button click handler - directly call room's screen share methods
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        if (!isScreenSharing) {
+          // Call room's startScreenShare method
+          await this.startScreenShare();
+          isScreenSharing = true;
+          btn.classList.add("sharing");
+
+          // Update button icon or text if needed
+          const svg = btn.querySelector("svg");
+          if (svg) {
+            svg.style.color = "#4CAF50"; // Green when sharing
+          }
+        } else {
+          // Call room's stopScreenShare method
+          await this.stopScreenShare();
+          isScreenSharing = false;
+          btn.classList.remove("sharing");
+
+          // Reset button icon color
+          const svg = btn.querySelector("svg");
+          if (svg) {
+            svg.style.color = "white"; // Default color
+          }
+        }
+      } catch (error) {
+        console.error("Screen share button error:", error);
+        // Reset button state on error
+        isScreenSharing = false;
+        btn.classList.remove("sharing");
+        const svg = btn.querySelector("svg");
+        if (svg) {
+          svg.style.color = "white";
+        }
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    // Listen to room events to sync button state
+    this.on("screenShareStarted", () => {
+      isScreenSharing = true;
+      btn.classList.add("sharing");
+      btn.disabled = false;
+
+      // Update local participant state
+      if (this.localParticipant) {
+        this.localParticipant.isScreenSharing = true;
+      }
+
+      // Update button visual
+      const svg = btn.querySelector("svg");
+      if (svg) {
+        svg.style.color = "#4CAF50";
+      }
+    });
+    this.on("screenShareStopped", () => {
+      isScreenSharing = false;
+      btn.classList.remove("sharing");
+      btn.disabled = false;
+
+      // Update local participant state
+      if (this.localParticipant) {
+        this.localParticipant.isScreenSharing = false;
+      }
+
+      // Reset button visual
+      const svg = btn.querySelector("svg");
+      if (svg) {
+        svg.style.color = "white";
+      }
+    });
+    this.on("screenShareStarting", () => {
+      btn.disabled = true; // Disable during transition
+    });
+    this.on("screenShareStopping", () => {
+      btn.disabled = true; // Disable during transition
+    });
+    this.on("error", ({
+      action,
+      error
+    }) => {
+      if (action === "startScreenShare" || action === "stopScreenShare") {
+        // Reset button state on screen share errors
+        isScreenSharing = false;
+        btn.classList.remove("sharing");
+        btn.disabled = false;
+        const svg = btn.querySelector("svg");
+        if (svg) {
+          svg.style.color = "white";
+        }
+
+        // Update participant state
+        if (this.localParticipant) {
+          this.localParticipant.isScreenSharing = false;
+        }
+      }
+    });
+  }
+
+  /**
    * Setup publisher for local participant
    */
   async _setupLocalPublisher() {
@@ -2844,7 +3337,7 @@ class Room extends EventEmitter$1 {
       publishUrl,
       streamType: "camera",
       videoElement: this.localParticipant.videoElement,
-      streamId: "camera_stream",
+      streamId: this.localParticipant.streamId,
       width: 1280,
       height: 720,
       framerate: 30,
@@ -2858,6 +3351,9 @@ class Room extends EventEmitter$1 {
     });
     await publisher.startPublishing();
     this.localParticipant.setPublisher(publisher);
+
+    // Setup screen share button in participant tile
+    this.setupScreenShareButton();
   }
 
   /**
@@ -2869,6 +3365,7 @@ class Room extends EventEmitter$1 {
       roomId: this.id,
       host: this.mediaConfig.host,
       videoElement: participant.videoElement,
+      isScreenSharing: false,
       onStatus: (msg, isError) => {
         participant.setConnectionStatus(isError ? "failed" : "connected");
       },
@@ -2881,6 +3378,9 @@ class Room extends EventEmitter$1 {
     }
     await subscriber.start();
     participant.setSubscriber(subscriber);
+    if (participant.isScreenSharing) {
+      await this.handleRemoteScreenShare(participant.userId, participant.streamId, true);
+    }
   }
 
   /**
@@ -2888,28 +3388,6 @@ class Room extends EventEmitter$1 {
    */
   async _handleServerEvent(event) {
     console.log("Received server event:", event);
-    // if (event.type === "join") {
-    //   const joinedParticipant = event.participant;
-    //   if (joinedParticipant.user_id === this.localParticipant?.userId) return;
-
-    //   const participant = this.addParticipant(
-    //     {
-    //       user_id: joinedParticipant.user_id,
-    //       stream_id: joinedParticipant.stream_id,
-    //       id: joinedParticipant.membership_id,
-    //       role: joinedParticipant.role,
-    //     },
-    //     this.localParticipant?.userId
-    //   );
-
-    //   this.renderParticipantTiles();
-    //   await this._setupRemoteSubscriber(participant);
-    // }
-
-    // if (event.type === "leave") {
-    //   this.removeParticipant(event.participant.user_id);
-    //   this.renderParticipantTiles();
-    // }
     if (event.type === "join") {
       const joinedParticipant = event.participant;
       if (joinedParticipant.user_id === this.localParticipant?.userId) return;
@@ -2950,6 +3428,16 @@ class Room extends EventEmitter$1 {
         }
       }
     }
+    if (event.type === "start_share_screen") {
+      const participant = event.participant;
+      if (participant.user_id === this.localParticipant?.userId) return;
+      await this.handleRemoteScreenShare(participant.user_id, participant.stream_id, true);
+    }
+    if (event.type === "stop_share_screen") {
+      const participant = event.participant;
+      if (participant.user_id === this.localParticipant?.userId) return;
+      await this.handleRemoteScreenShare(participant.user_id, participant.stream_id, false);
+    }
   }
 
   /**
@@ -2966,8 +3454,6 @@ class Room extends EventEmitter$1 {
       } else if (this.pinnedParticipant === p) {
         this.unpinParticipant();
       }
-
-      // Chỉ di chuyển tile của participant này
       this._moveParticipantTile(p);
     });
     participant.on("error", ({
@@ -2997,6 +3483,135 @@ class Room extends EventEmitter$1 {
       this.mainVideoArea.appendChild(participant.tile);
     } else if (!participant.isPinned && this.sidebarArea) {
       this.sidebarArea.appendChild(participant.tile);
+    }
+  }
+
+  /**
+   * Start screen sharing for local participant
+   */
+  async startScreenShare() {
+    if (!this.localParticipant || !this.localParticipant.publisher) {
+      throw new Error("Local participant or publisher not available");
+    }
+    try {
+      this.emit("screenShareStarting", {
+        room: this
+      });
+
+      // Get display media
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          width: 1920,
+          height: 1080
+        },
+        audio: true
+      });
+
+      // Start screen share through publisher
+      await this.localParticipant.publisher.startShareScreen(screenStream);
+      this.emit("screenShareStarted", {
+        room: this
+      });
+      return screenStream;
+    } catch (error) {
+      this.emit("error", {
+        room: this,
+        error,
+        action: "startScreenShare"
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Stop screen sharing for local participant
+   */
+  async stopScreenShare() {
+    if (!this.localParticipant || !this.localParticipant.publisher) {
+      throw new Error("Local participant or publisher not available");
+    }
+    try {
+      this.emit("screenShareStopping", {
+        room: this
+      });
+      await this.localParticipant.publisher.stopShareScreen();
+      this.emit("screenShareStopped", {
+        room: this
+      });
+    } catch (error) {
+      this.emit("error", {
+        room: this,
+        error,
+        action: "stopScreenShare"
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Handle remote screen share
+   */
+  async handleRemoteScreenShare(participantId, screenStreamId, isStarting) {
+    const participant = this.participants.get(participantId);
+    if (!participant) return;
+    if (isStarting) {
+      // Create screen share tile
+      const screenTile = participant.createScreenShareTile();
+
+      // Append to main video area (screen share takes priority)
+      if (this.mainVideoArea) {
+        this.mainVideoArea.innerHTML = "";
+        this.mainVideoArea.appendChild(screenTile);
+      }
+
+      // Create subscriber for screen share
+      const screenSubscriber = new Subscriber$1({
+        streamId: screenStreamId,
+        roomId: this.id,
+        host: this.mediaConfig.host,
+        videoElement: participant.screenVideoElement,
+        isScreenSharing: true,
+        onStatus: (msg, isError) => {
+          console.log(`Screen share status: ${msg}`);
+        },
+        audioWorkletUrl: "workers/audio-worklet1.js",
+        mstgPolyfillUrl: "polyfills/MSTG_polyfill.js"
+      });
+
+      // Add to audio mixer if has audio
+      if (this.audioMixer) {
+        screenSubscriber.setAudioMixer(this.audioMixer);
+      }
+      await screenSubscriber.start();
+
+      // Store reference
+      participant.screenSubscriber = screenSubscriber;
+      participant.isScreenSharing = true;
+      // participant.setScreenSubscriber(screenSubscriber);
+
+      this.emit("remoteScreenShareStarted", {
+        room: this,
+        participant
+      });
+    } else {
+      // Stop screen share
+      if (participant.screenSubscriber) {
+        participant.screenSubscriber.stop();
+        participant.screenSubscriber = null;
+      }
+      participant.removeScreenShareTile();
+
+      // Restore pinned participant to main video
+      if (this.pinnedParticipant && this.pinnedParticipant.tile) {
+        if (this.mainVideoArea) {
+          this.mainVideoArea.innerHTML = "";
+          this.mainVideoArea.appendChild(this.pinnedParticipant.tile);
+        }
+      }
+      this.emit("remoteScreenShareStopped", {
+        room: this,
+        participant
+      });
     }
   }
 
