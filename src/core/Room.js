@@ -660,6 +660,9 @@ class Room extends EventEmitter {
       height: 720,
       framerate: 30,
       bitrate: 1_500_000,
+      roomId: this.id,
+      // use webtransport if supported, fallback to WebRTC in safari
+      useWebRTC: true,
       onStatusUpdate: (msg, isError) => {
         this.localParticipant.setConnectionStatus(
           isError ? "failed" : "connected"
@@ -687,6 +690,11 @@ class Room extends EventEmitter {
       host: this.mediaConfig.host,
       videoElement: participant.videoElement,
       isScreenSharing: false,
+      // DO for adaptive camera url
+      userMediaWorker: "sfu-adaptive-bitrate-webrtc.ermis-network.workers.dev",
+      // DO for screen share url
+      screenShareWorker:
+        "sfu-webrtc-screen_share_test.ermis-network.workers.dev",
       onStatus: (msg, isError) => {
         participant.setConnectionStatus(isError ? "failed" : "connected");
       },

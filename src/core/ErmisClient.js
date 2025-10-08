@@ -17,7 +17,7 @@ class ErmisClient extends EventEmitter {
         config.apiUrl ||
         `https://${config.host || "daibo.ermis.network:9999"}/meeting`,
       webtpUrl:
-        config.webtpUrl || "https://daibo.ermis.network:4455/meeting/wt",
+        config.webtpUrl || "https://daibo.ermis.network:4457/meeting/wt",
       autoSaveCredentials: config.autoSaveCredentials !== false,
       reconnectAttempts: config.reconnectAttempts || 3,
       reconnectDelay: config.reconnectDelay || 2000,
